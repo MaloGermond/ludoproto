@@ -14,10 +14,21 @@
   "author": "",
   "type": "commonjs",
   "main": "index.js",
+  "private": true,
+  "workspaces": [
+    "projects/*",
+    "packages/*"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "new": "turbo gen"
   },
   "dependencies": {
     "turbo": "^2.11.4"
+  },
+  "devDependencies": {
+    "@turbo/gen": "^2.11.4"
   }
 }
