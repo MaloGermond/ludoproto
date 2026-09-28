@@ -15,7 +15,7 @@ const SIM_DT = 1 / 60;
 const MAX_FRAME_DT = 0.25; // évite une avalanche de pas après un onglet en arrière-plan
 
 const SHIP_SIZE = 14;
-const THRUST_ACCEL = 90; // accélération à pleine puissance
+const THRUST_ACCEL = 45; // accélération à pleine puissance
 const LANDED_ROTATION_SPEED = 3.6; // rad/s — rotation au sol, sans inertie
 
 // atterrissage : sans danger si le vaisseau touche par l'arrière (nez vers
@@ -74,8 +74,8 @@ const planet = {
 
 const moon = {
   name: "Lune",
-  orbitRadius: 900,
-  orbitSpeed: 0.05, // rad/s
+  orbitRadius: 1600,
+  orbitSpeed: 0.028, // rad/s — réduit pour garder une vitesse de déplacement similaire malgré le rayon plus grand
   radius: 60,
   mass: 500,
   color: [180, 180, 180],
@@ -570,6 +570,7 @@ function draw() {
   translate(-cameraX, -cameraY);
 
   drawTrail();
+  drawOtherBodyOrbit(referenceBody);
   if (prediction) drawGhostBodies(prediction);
   drawBody(planet);
   drawBody(moon);
@@ -888,6 +889,21 @@ function drawPathEnd(prediction) {
   textSize(12 / zoom);
   textAlign(CENTER, BOTTOM);
   text("Impact prévu", p.x, p.y - r - 2 / zoom);
+  pop();
+}
+
+// dans ce système à deux corps (la Lune orbite la Terre sur un cercle),
+// l'astre qui n'est pas le référentiel actif trace toujours un cercle de
+// même rayon (celui de l'orbite lunaire) autour de la position actuelle du
+// référentiel — que ce soit la Terre (orbite réelle de la Lune) ou la Lune
+// (orbite apparente de la Terre dans son référentiel).
+function drawOtherBodyOrbit(referenceBody) {
+  push();
+  noFill();
+  stroke(255, 255, 255, 90);
+  strokeWeight(1 / zoom);
+  drawingContext.setLineDash([3 / zoom, 6 / zoom]);
+  circle(referenceBody.x, referenceBody.y, moon.orbitRadius * 2);
   pop();
 }
 
