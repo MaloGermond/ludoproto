@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>eco-dashboard — mécaniques socio-économiques</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <h1>Mécaniques socio-économiques <small>POC #12</small></h1>
+    <div id="status"></div>
+    <div class="controls">
+      <label>Joueurs <select id="cfg-players"><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label>Graine <input id="cfg-seed" type="number" value="1" min="1" /></label>
+      <button id="btn-new" type="button">Nouvelle partie</button>
+      <button id="btn-end" class="primary" type="button">Fin du tour ▶</button>
+      <button id="btn-sim" type="button">Simuler 5 tours</button>
+      <button id="btn-sim-end" type="button">Jusqu'à la fin</button>
+    </div>
+  </header>
+  <div id="ending" hidden></div>
+  <div id="toast" hidden></div>
+
+  <main>
+    <section id="players" class="grid"></section>
+
+    <section class="panel" id="actions">
+      <h2>Agir en tant que <select id="actor"></select> <span id="actor-summary" class="muted"></span></h2>
+      <div class="action-grid">
+        <form id="f-research" class="box">
+          <h3>Recherche</h3>
+          <p class="muted">Arbitrage irréversible : l'argent et la matière investis sont perdus, convertis en points de recherche.</p>
+          <div class="row">
+            <label>₵ <input name="money" type="number" min="0" value="10" /></label>
+            <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+            <button type="submit" data-act="invest">Investir</button>
+          </div>
+          <div class="row">
+            <select name="tech"></select>
+            <button type="button" data-act="unlock">Débloquer</button>
+          </div>
+          <p class="hint" data-hint="tech"></p>
+        </form>
+
+        <form id="f-build" class="box">
+          <h3>Construire</h3>
+          <div class="row">
+            <select name="type"></select>
+            <select name="zone"></select>
+          </div>
+          <div class="row">
+            <label><input type="radio" name="mode" value="prudent" checked /> prudent</label>
+            <label><input type="radio" name="mode" value="agressif" /> agressif</label>
+            <button type="submit">Construire</button>
+          </div>
+          <p class="hint" data-hint="build"></p>
+        </form>
+
+        <form id="f-market" class="box">
+          <h3>Marché</h3>
+          <div class="row">
+            <select name="rare"></select>
+            <label>Mon prix <input name="price" type="number" min="1" value="5" /></label>
+            <button type="button" data-act="price">Fixer</button>
+          </div>
+          <div class="row">
+            <select name="seller"></select>
+            <label>Qté <input name="qty" type="number" min="1" value="1" /></label>
+            <button type="submit">Acheter</button>
+          </div>
+          <p class="hint" data-hint="market"></p>
+        </form>
+
+        <form id="f-trade" class="box wide">
+          <h3>Troc / demande de compensation</h3>
+          <div class="row">
+            <label>Avec <select name="to"></select></label>
+            <label class="grow">Note <input name="note" type="text" placeholder="ex : compensation pour ma mine" /></label>
+          </div>
+          <div class="bundles">
+            <fieldset data-side="give">
+              <legend>Je donne</legend>
+              <label>₵ <input name="money" type="number" min="0" value="0" /></label>
+              <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+              <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
+              <label>Licence <select name="tech"></select></label>
+              <label>Parts de <select name="shareCo"></select> <input name="shareQty" type="number" min="0" value="0" /></label>
+            </fieldset>
+            <fieldset data-side="want">
+              <legend>Je demande</legend>
+              <label>₵ <input name="money" type="number" min="0" value="0" /></label>
+              <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+              <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
+              <label>Licence <select name="tech"></select></label>
+              <label>Parts de <select name="shareCo"></select> <input name="shareQty" type="number" min="0" value="0" /></label>
+            </fieldset>
+          </div>
+          <button type="submit">Proposer</button>
+        </form>
+
+        <form id="f-loan" class="box">
+          <h3>Prêt</h3>
+          <div class="row">
+            <select name="dir">
+              <option value="from">Je prête à</option>
+              <option value="to">J'emprunte à</option>
+            </select>
+            <select name="other"></select>
+          </div>
+          <div class="row">
+            <label>₵ <input name="money" type="number" min="0" value="20" /></label>
+            <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+          </div>
+          <div class="row">
+            <label>Rembourser <input name="repay" type="number" min="0" value="25" /> ₵</label>
+            <label>dans <input name="due" type="number" min="1" placeholder="∞" value="3" /> tours</label>
+          </div>
+          <p class="muted">Délai vide = sans condition (remboursement libre). Montant 0 = don.</p>
+          <button type="submit">Proposer</button>
+        </form>
+
+        <form id="f-buyout" class="box">
+          <h3>Rachat</h3>
+          <p class="muted">Possible si la cible est en faillite ou si vous détenez ≥ 51 parts.</p>
+          <div class="row">
+            <select name="target"></select>
+            <button type="submit">Racheter</button>
+          </div>
+          <p class="hint" data-hint="buyout"></p>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel two-col">
+      <div>
+        <h2>Offres en cours</h2>
+        <div id="offers"></div>
+      </div>
+      <div>
+        <h2>Prêts et dettes</h2>
+        <div id="loans"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Qui lèse / avantage qui</h2>
+      <div id="relations"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Indicateurs pour les questions ouvertes</h2>
+      <div id="indicators" class="ind-grid"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Journal <select id="log-filter"></select> <select id="log-type"></select></h2>
+      <ol id="log"></ol>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+  <script src="strategies.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
