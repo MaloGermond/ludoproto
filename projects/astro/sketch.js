@@ -1,6 +1,7 @@
 // Prototype "lancer, orbiter" — issue #4
-// Un vaisseau décolle de la surface d'une planète, subit une gravité
-// newtonienne (planète + lune), et peut être placé en orbite stable.
+// Un vaisseau décolle de la surface de la Terre, subit une gravité
+// newtonienne cumulée de tous les astres actifs, et peut être placé en
+// orbite stable. Système solaire configurable : voir BODY_CONFIGS.
 //
 // Mode navigation — issue #5
 // Un bouton met le jeu en pause et ouvre la planification : on pose des
@@ -61,31 +62,43 @@ const PHASE_STYLES = {
   burn: { color: [255, 150, 60, 240], weight: 3.5, dashed: false },
 };
 
-const planet = {
-  name: "Terre", // astre principal du système par défaut, en attendant un Soleil
-  x: 0,
-  y: 0,
-  vx: 0,
-  vy: 0,
-  radius: 220,
-  mass: 1800,
-  color: [90, 140, 200],
-};
+// ---------------------------------------------------------------------------
+// Système solaire — configuration déclarative. Pour ajouter un astre,
+// ajouter une entrée ; pour en retirer un, supprimer l'entrée ou mettre
+// `enabled: false`. `parent` référence l'id de l'astre autour duquel il
+// orbite (null pour l'astre central, fixe). Orbites circulaires, non
+// simulées entre elles — seul le vaisseau subit la gravité cumulée de tous
+// les astres actifs.
+// ---------------------------------------------------------------------------
 
-const moon = {
-  name: "Lune",
-  orbitRadius: 1600,
-  orbitSpeed: 0.028, // rad/s — réduit pour garder une vitesse de déplacement similaire malgré le rayon plus grand
-  radius: 60,
-  mass: 500,
-  color: [180, 180, 180],
-  x: 0,
-  y: 0,
-  vx: 0,
-  vy: 0,
-};
-// rayon de la sphère d'influence de la Lune (formule patched-conics simplifiée)
-moon.soi = moon.orbitRadius * Math.pow(moon.mass / planet.mass, 2 / 5);
+// masses choisies pour rester jouables : le Soleil domine largement chaque
+// planète (nécessaire pour que la hiérarchie des sphères d'influence reste
+// cohérente), et la Terre est assez loin du Soleil pour que la sphère
+// d'influence terrestre reste bien plus grande que l'orbite de la Lune.
+const BODY_CONFIGS = [
+  { id: "sun", name: "Soleil", parent: null, radius: 900, mass: 25000, color: [255, 210, 90] },
+  { id: "mercury", name: "Mercure", parent: "sun", orbitRadius: 2200, orbitSpeed: 0.016, radius: 40, mass: 40, color: [180, 170, 160] },
+  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 4500, orbitSpeed: 0.01, radius: 90, mass: 500, color: [230, 200, 140] },
+  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 7000, orbitSpeed: 0.007, radius: 220, mass: 1800, color: [90, 140, 200] },
+  { id: "moon", name: "Lune", parent: "earth", orbitRadius: 1600, orbitSpeed: 0.028, radius: 60, mass: 500, color: [180, 180, 180] },
+  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 9500, orbitSpeed: 0.005, radius: 130, mass: 650, color: [210, 120, 80] },
+  { id: "jupiter", name: "Jupiter", parent: "sun", orbitRadius: 14000, orbitSpeed: 0.0028, radius: 480, mass: 6000, color: [220, 180, 140] },
+  { id: "saturn", name: "Saturne", parent: "sun", orbitRadius: 19000, orbitSpeed: 0.0018, radius: 420, mass: 4500, color: [230, 210, 160] },
+  { id: "uranus", name: "Uranus", parent: "sun", orbitRadius: 24000, orbitSpeed: 0.0012, radius: 260, mass: 2200, color: [160, 220, 230] },
+  { id: "neptune", name: "Neptune", parent: "sun", orbitRadius: 29000, orbitSpeed: 0.0009, radius: 250, mass: 2400, color: [100, 140, 230] },
+];
+
+// résout les parents et calcule la sphère d'influence de chaque astre par
+// rapport à son parent (formule patched-conics simplifiée)
+const ALL_BODIES = BODY_CONFIGS.filter((c) => c.enabled !== false).map((c) => ({ ...c, x: 0, y: 0, vx: 0, vy: 0 }));
+const bodyById = Object.fromEntries(ALL_BODIES.map((b) => [b.id, b]));
+for (const b of ALL_BODIES) {
+  b.parentBody = b.parent ? bodyById[b.parent] : null;
+  b.soi = b.parentBody ? b.orbitRadius * Math.pow(b.mass / b.parentBody.mass, 2 / 5) : Infinity;
+}
+
+const sun = ALL_BODIES.find((b) => !b.parentBody);
+const planet = bodyById.earth; // astre de départ du vaisseau
 
 let ship;
 let trail = [];
@@ -120,9 +133,10 @@ function setup() {
 
 function resetShip() {
   const startAngle = -HALF_PI; // sommet de la planète
+  const pos = bodyPositionAt(planet, gameTime); // la Terre orbite le Soleil, sa position varie dans le temps
   ship = {
-    x: planet.x + cos(startAngle) * (planet.radius + SHIP_SIZE),
-    y: planet.y + sin(startAngle) * (planet.radius + SHIP_SIZE),
+    x: pos.x + cos(startAngle) * (planet.radius + SHIP_SIZE),
+    y: pos.y + sin(startAngle) * (planet.radius + SHIP_SIZE),
     vx: 0,
     vy: 0,
     angle: startAngle, // nez à l'opposé du centre de la planète, prêt à décoller
@@ -136,6 +150,8 @@ function resetShip() {
   };
   trail = [];
   autopilot = null;
+  cameraX = ship.x; // évite un panoramique depuis le Soleil au démarrage/relance
+  cameraY = ship.y;
 }
 
 function windowResized() {
@@ -146,43 +162,53 @@ function windowResized() {
 // Astres : positions en fonction du temps de jeu
 // ---------------------------------------------------------------------------
 
-function moonPositionAt(t) {
-  return {
-    x: planet.x + cos(t * moon.orbitSpeed) * moon.orbitRadius,
-    y: planet.y + sin(t * moon.orbitSpeed) * moon.orbitRadius,
-  };
-}
-
+// position d'un astre à l'instant t : fixe pour l'astre central, sinon en
+// orbite circulaire autour de la position (elle-même dynamique) de son parent
 function bodyPositionAt(body, t) {
-  return body === moon ? moonPositionAt(t) : { x: planet.x, y: planet.y };
+  if (!body.parentBody) return { x: body.x, y: body.y };
+  const parentPos = bodyPositionAt(body.parentBody, t);
+  return {
+    x: parentPos.x + cos(t * body.orbitSpeed) * body.orbitRadius,
+    y: parentPos.y + sin(t * body.orbitSpeed) * body.orbitRadius,
+  };
 }
 
 function bodyVelocityAt(body, t) {
-  if (body !== moon) return { vx: 0, vy: 0 };
-  // vitesse instantanée de la Lune sur son orbite (dérivée de la position)
+  if (!body.parentBody) return { vx: 0, vy: 0 };
+  const parentVel = bodyVelocityAt(body.parentBody, t);
   return {
-    vx: -moon.orbitRadius * moon.orbitSpeed * sin(t * moon.orbitSpeed),
-    vy: moon.orbitRadius * moon.orbitSpeed * cos(t * moon.orbitSpeed),
+    vx: parentVel.vx - body.orbitRadius * body.orbitSpeed * sin(t * body.orbitSpeed),
+    vy: parentVel.vy + body.orbitRadius * body.orbitSpeed * cos(t * body.orbitSpeed),
   };
 }
 
-// met à jour les astres affichés à l'instant t
+// met à jour la position/vitesse de chaque astre actif à l'instant t
 function bodies(t) {
-  const pos = moonPositionAt(t);
-  const vel = bodyVelocityAt(moon, t);
-  moon.x = pos.x;
-  moon.y = pos.y;
-  moon.vx = vel.vx;
-  moon.vy = vel.vy;
-  return [planet, moon];
+  for (const body of ALL_BODIES) {
+    if (!body.parentBody) continue; // l'astre central reste fixe
+    const pos = bodyPositionAt(body, t);
+    const vel = bodyVelocityAt(body, t);
+    body.x = pos.x;
+    body.y = pos.y;
+    body.vx = vel.vx;
+    body.vy = vel.vy;
+  }
+  return ALL_BODIES;
 }
 
 function getReferenceBody(x, y, t) {
-  // dans la sphère d'influence de la Lune : référentiel lunaire.
-  // sinon, loin de tout, le référentiel par défaut est l'astre principal du système.
-  const moonPos = moonPositionAt(t);
-  if (dist(x, y, moonPos.x, moonPos.y) < moon.soi) return moon;
-  return planet;
+  // l'astre le plus spécifique (sphère d'influence la plus petite) qui
+  // contient le vaisseau. Loin de tout, le référentiel par défaut est
+  // l'astre central du système.
+  let best = null;
+  for (const body of ALL_BODIES) {
+    if (!body.parentBody) continue;
+    const pos = bodyPositionAt(body, t);
+    if (dist(x, y, pos.x, pos.y) < body.soi && (!best || body.soi < best.soi)) {
+      best = body;
+    }
+  }
+  return best || sun;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,8 +297,8 @@ function stepShip(s, t, dt, control) {
     }
   }
 
-  // gravité newtonienne cumulée de chaque corps, à leur position à l'instant t
-  const bodyStates = [planet, moon].map((body) => ({ body, ...bodyPositionAt(body, t) }));
+  // gravité newtonienne cumulée de chaque astre actif, à sa position à l'instant t
+  const bodyStates = ALL_BODIES.map((body) => ({ body, ...bodyPositionAt(body, t) }));
   let ax = 0;
   let ay = 0;
   for (const { body, x, y } of bodyStates) {
@@ -570,10 +596,9 @@ function draw() {
   translate(-cameraX, -cameraY);
 
   drawTrail();
-  drawOtherBodyOrbit(referenceBody);
+  drawOrbits();
   if (prediction) drawGhostBodies(prediction);
-  drawBody(planet);
-  drawBody(moon);
+  for (const body of ALL_BODIES) drawBody(body);
   if (prediction) {
     drawPredictedPath(prediction.points);
     if (prediction.periapsis) drawApsis(prediction.periapsis, "Périgée", [255, 130, 130]);
@@ -632,6 +657,47 @@ function selectedNode() {
 
 function addNodeAt(t) {
   const node = { id: nextNodeId++, t, ...DEFAULT_NODE };
+  planNodes.push(node);
+  planNodes.sort((a, b) => a.t - b.t);
+  selectedNodeId = node.id;
+  planDirty = true;
+  syncPanel();
+}
+
+// calcule et ajoute la manœuvre qui circularise l'orbite à la distance
+// actuelle du référentiel actif : vitesse purement tangentielle, de la bonne
+// magnitude pour une orbite circulaire à ce rayon (sens de révolution
+// conservé). Approximation valable tant que la poussée reste brève devant
+// la période orbitale — pas un calcul de rendez-vous optimal.
+function circularizeOrbit() {
+  if (mode !== "planning" || ship.landed || ship.crashed) return;
+
+  const ref = getReferenceBody(ship.x, ship.y, gameTime);
+  const pos = bodyPositionAt(ref, gameTime);
+  const vel = bodyVelocityAt(ref, gameTime);
+  const relX = ship.x - pos.x;
+  const relY = ship.y - pos.y;
+  const r = mag(relX, relY);
+  const relVx = ship.vx - vel.vx;
+  const relVy = ship.vy - vel.vy;
+
+  const radialAngle = atan2(relY, relX);
+  const angularMomentum = relX * relVy - relY * relVx;
+  const tangentialDir = angularMomentum >= 0 ? radialAngle + HALF_PI : radialAngle - HALF_PI;
+
+  const targetSpeed = sqrt((G * ref.mass) / r);
+  const targetVx = cos(tangentialDir) * targetSpeed;
+  const targetVy = sin(tangentialDir) * targetSpeed;
+
+  const deltaVx = targetVx - relVx;
+  const deltaVy = targetVy - relVy;
+  const deltaV = mag(deltaVx, deltaVy);
+  if (deltaV < 0.5) return; // déjà quasi circulaire
+
+  const burnAngle = atan2(deltaVy, deltaVx);
+  const heading = Math.round(degrees(angleDiff(progradeAngle(ship, gameTime), burnAngle)));
+
+  const node = { id: nextNodeId++, t: gameTime, heading, power: 1, duration: deltaV / THRUST_ACCEL };
   planNodes.push(node);
   planNodes.sort((a, b) => a.t - b.t);
   selectedNodeId = node.id;
@@ -758,6 +824,7 @@ function setupUI() {
     plan: byId("btn-plan"),
     launch: byId("btn-launch"),
     clear: byId("btn-clear"),
+    circularize: byId("btn-circularize"),
     panel: byId("node-panel"),
     title: byId("node-title"),
     remove: byId("btn-delete"),
@@ -781,6 +848,7 @@ function setupUI() {
   onClick(ui.plan, enterPlanning);
   onClick(ui.launch, launchPlan);
   onClick(ui.clear, clearPlan);
+  onClick(ui.circularize, circularizeOrbit);
   onClick(ui.remove, deleteSelectedNode);
 
   ui.time.addEventListener("input", () => updateSelectedNode({ t: gameTime + Number(ui.time.value) }));
@@ -818,6 +886,8 @@ function updateUI(prediction) {
   ui.clear.hidden = !planning;
   ui.clear.disabled = planNodes.length === 0;
   ui.launch.textContent = planNodes.length ? "▶ Lancer le plan" : "▶ Reprendre";
+  ui.circularize.hidden = !planning;
+  ui.circularize.disabled = ship.landed || ship.crashed;
 
   const node = planning ? selectedNode() : null;
   if (!node) {
@@ -892,18 +962,18 @@ function drawPathEnd(prediction) {
   pop();
 }
 
-// dans ce système à deux corps (la Lune orbite la Terre sur un cercle),
-// l'astre qui n'est pas le référentiel actif trace toujours un cercle de
-// même rayon (celui de l'orbite lunaire) autour de la position actuelle du
-// référentiel — que ce soit la Terre (orbite réelle de la Lune) ou la Lune
-// (orbite apparente de la Terre dans son référentiel).
-function drawOtherBodyOrbit(referenceBody) {
+// orbite de chaque astre autour de son parent (toujours circulaire ici) —
+// dessinée à la position actuelle du parent, quel que soit le référentiel actif
+function drawOrbits() {
   push();
   noFill();
   stroke(255, 255, 255, 90);
   strokeWeight(1 / zoom);
   drawingContext.setLineDash([3 / zoom, 6 / zoom]);
-  circle(referenceBody.x, referenceBody.y, moon.orbitRadius * 2);
+  for (const body of ALL_BODIES) {
+    if (!body.parentBody) continue;
+    circle(body.parentBody.x, body.parentBody.y, body.orbitRadius * 2);
+  }
   pop();
 }
 
@@ -926,7 +996,7 @@ function drawGhostBodies(prediction) {
   for (const pn of prediction.nodes) {
     if (pn.startT === undefined) continue;
     const highlighted = pn.id === selectedNodeId;
-    for (const body of [planet, moon]) {
+    for (const body of ALL_BODIES) {
       if (body === prediction.frame) continue; // le référentiel reste figé à l'affichage
       const pos = bodyPositionAt(body, pn.startT);
       const d = prediction.toDisplay(pos.x, pos.y, pn.startT);
@@ -1096,6 +1166,7 @@ function drawHUD(referenceBody, prediction) {
           "Glisser le fond : déplacer la vue · molette : zoom · [Suppr] effacer la manœuvre · [Échap] désélectionner",
           "[P] ou « Lancer le plan » : reprendre le jeu, le pilote automatique exécute le plan",
           "Tracé : vert = sans poussée · jaune = rotation · orange = poussée — cercles pointillés : astres à l'heure de chaque manœuvre",
+          "« Orbite circulaire » : ajoute automatiquement la manœuvre qui circularise l'orbite à la distance actuelle",
         ]
       : [
           "↑ poussée · ←/→ maintenir pour tourner, tapoter pour ajuster finement (inertie, sans frottement)",
