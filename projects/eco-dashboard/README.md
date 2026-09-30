@@ -81,9 +81,9 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 
 Sur 300 parties à stratégies tirées au hasard :
 
-- **Fins** : 38 % de défaites écologiques, 17 % d'explosions du Soleil sans survivant, 26 % de fins narratives, 13 % économiques, 6 % galactiques.
-- **Âges** : mid game vers le tour 32 ; late game dans 56 % des parties, vers le tour 150.
-- **Forêt sombre** : 176 projectiles lancés en 300 parties, 29 % déviés ; le Soleil explose dans 37 % des parties, et dans la moitié des cas au moins un joueur survit en s'étant replié.
+- **Fins** : 41 % de défaites écologiques, 16 % d'explosions du Soleil sans survivant, 29 % de fins narratives, 11 % économiques, 3 % galactiques.
+- **Âges** : mid game vers le tour 32 ; late game dans 53 % des parties, vers le tour 156.
+- **Forêt sombre** : 158 projectiles lancés en 300 parties, 20 % déviés ; le Soleil explose dans 38 % des parties, et dans plus de la moitié des cas au moins un joueur survit en s'étant replié.
 - **Coopération** : une table 100 % coopérative dévie bien plus souvent et ne perd presque jamais la planète par pollution. Une table mélangée échoue souvent parce que le savoir nécessaire est éparpillé chez des joueurs qui se replient.
 - **Ressource rare introuvable** : les platinoïdes ne viennent que de la Ceinture ; tant que personne n'y va, l'électronique avancée reste bloquée. Cette dépendance est intéressante à observer en partie humaine.
 - **Régolithe fondu dans les métaux** : les technos de Structure coûtent désormais des métaux en plus ; sur une table coopérative, la part de projectiles déviés passe d'environ 33 % à 24 % (course à PRO-7 un peu plus lente).
