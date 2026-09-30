@@ -101,10 +101,20 @@ const BODY_CONFIGS = [
   { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200] },
   { id: "moon", name: "Lune", parent: "earth", orbitRadius: 2200, phase: 60, radius: 60, mass: 120, color: [180, 180, 180] },
   { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 500, color: [210, 120, 80] },
+  { id: "phobos", name: "Phobos", parent: "mars", orbitRadius: 500, phase: 30, radius: 15, mass: 15, color: [140, 130, 120] },
+  { id: "deimos", name: "Déimos", parent: "mars", orbitRadius: 1000, phase: 210, radius: 12, mass: 12, color: [150, 140, 130] },
   { id: "jupiter", name: "Jupiter", parent: "sun", orbitRadius: 36000, phase: 250, radius: 500, mass: 3000, color: [220, 180, 140] },
+  { id: "io", name: "Io", parent: "jupiter", orbitRadius: 1900, phase: 0, radius: 45, mass: 50, color: [230, 210, 120] },
+  { id: "europa", name: "Europe", parent: "jupiter", orbitRadius: 3600, phase: 90, radius: 40, mass: 45, color: [210, 200, 190] },
+  { id: "ganymede", name: "Ganymède", parent: "jupiter", orbitRadius: 6500, phase: 180, radius: 55, mass: 65, color: [160, 150, 140] },
+  { id: "callisto", name: "Callisto", parent: "jupiter", orbitRadius: 10500, phase: 270, radius: 50, mass: 60, color: [120, 110, 100] },
   { id: "saturn", name: "Saturne", parent: "sun", orbitRadius: 68000, phase: 320, radius: 420, mass: 1500, color: [230, 210, 160] },
+  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 60, color: [220, 180, 110] },
   { id: "uranus", name: "Uranus", parent: "sun", orbitRadius: 108000, phase: 30, radius: 260, mass: 600, color: [160, 220, 230] },
+  { id: "titania", name: "Titania", parent: "uranus", orbitRadius: 5500, phase: 120, radius: 35, mass: 20, color: [180, 190, 195] },
   { id: "neptune", name: "Neptune", parent: "sun", orbitRadius: 160000, phase: 170, radius: 250, mass: 600, color: [100, 140, 230] },
+  // orbite rétrograde (comme dans la réalité) : vitesse de Kepler forcée en négatif
+  { id: "triton", name: "Triton", parent: "neptune", orbitRadius: 6500, orbitSpeed: -0.00132, phase: 80, radius: 40, mass: 25, color: [230, 220, 210] },
 ];
 
 const ALL_BODIES = BODY_CONFIGS.filter((c) => c.enabled !== false).map((c) => ({ ...c, x: 0, y: 0, vx: 0, vy: 0, children: [] }));
