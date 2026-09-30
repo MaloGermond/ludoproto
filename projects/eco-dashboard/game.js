@@ -45,7 +45,7 @@
   ];
 
   const CONFIG = {
-    maxTurns: 400, // 100 ans à 4 tours (saisons) par an
+    simSafetyCap: 5000, // pas de limite de temps côté jeu (checkEnd) : garde-fou technique pour éviter une boucle infinie (sim.js, "simuler jusqu'à la fin")
     startMoney: 80,
     startMaterial: 30,
     maintenance: 2, // argent / infrastructure / tour (hors base)
@@ -1524,9 +1524,6 @@
         const type = bought >= killed ? "économique" : "guerrière";
         s.ended = { type, text: `Victoire ${type} de ${w.name}.`, winners: [w.id] };
       }
-    }
-    if (!s.ended && s.turn >= CONFIG.maxTurns) {
-      s.ended = { type: "sans vainqueur", text: `Fin de partie au tour ${CONFIG.maxTurns} sans vainqueur. Encore en jeu : ${alive.map((p) => p.name).join(", ")}.`, winners: [] };
     }
     if (s.ended) log(s, "fin", s.ended.text, s.ended.winners);
     return s.ended;

@@ -30,7 +30,10 @@ for (let seed = 1; seed <= games; seed++) {
   // sans liste imposée : tirage reproductible des stratégies
   const strategies = fixed || Array.from({ length: n }, () => bots[Math.floor(G.rand(pick) * bots.length)]);
   const s = G.newGame({ players: n, seed, strategies });
-  while (!s.ended) G.endTurn(s);
+  while (!s.ended && s.turn < G.CONFIG.simSafetyCap) G.endTurn(s);
+  // plus de limite de temps côté jeu : si même le plafond de sécurité est
+  // atteint sans fin naturelle, c'est une partie bloquée (stats seulement)
+  if (!s.ended) s.ended = { type: "plafond sécurité", text: "Plafond de sécurité atteint sans fin naturelle.", winners: [] };
 
   endings[s.ended.type] = (endings[s.ended.type] || 0) + 1;
   if (s.ended.type === "collective") {

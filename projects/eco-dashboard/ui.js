@@ -81,7 +81,7 @@ function meter(value, max, color) {
 function renderStatus() {
   const planetColor = S.planet > 60 ? "var(--good)" : S.planet > 30 ? "var(--warn)" : "var(--bad)";
   $("#status").innerHTML = `
-    <span>Tour <strong>${S.turn}</strong> / ${CONFIG.maxTurns}</span>
+    <span>Tour <strong>${S.turn}</strong></span>
     <span>Âge <strong>${AGES[S.age].name}</strong></span>
     <span>Planète ${S.sunDestroyed ? `<strong class="bad">détruite</strong>` : `${meter(S.planet, CONFIG.planetHealth, planetColor)} ${fmt(S.planet)} <span class="muted">(pollution terrestre ${fmt(S.lastPollution || 0)} − régén. ${CONFIG.pollutionRegen}/tour)</span>`}</span>
     <span>Forêt sombre ${forestLabel()}</span>`;
@@ -352,7 +352,7 @@ function bindActions() {
   $("#btn-new").onclick = newGame;
   $("#btn-end").onclick = () => run(() => Game.endTurn(S));
   $("#btn-sim").onclick = () => simulate(5);
-  $("#btn-sim-end").onclick = () => simulate(CONFIG.maxTurns);
+  $("#btn-sim-end").onclick = () => simulate(CONFIG.simSafetyCap);
   $("#actor").onchange = (e) => {
     actor = +e.target.value;
     render();
