@@ -77,7 +77,8 @@
     carbonDiscount: { "STR-8": 0.5, "STR-9": 1 }, // part des équipements en métaux et platinoïdes épargnée par la maîtrise du carbone
     // forêt sombre
     darkForestTrigger: "orbit", // jalon (cf. MILESTONES) qui rend l'humanité visible
-    darkForestPerVis: 0.0005, // risque de lancement d'un projectile par tour, par point de visibilité cumulée de la table
+    darkForestPerVis: 0.0005, // risque de lancement d'un projectile par tour, par point de visibilité cumulée de la table AU-DESSUS du seuil de sécurité
+    darkForestSafeVisibility: 10, // en dessous de ce seuil, risque exactement nul (quelques installations discrètes ne suffisent pas à se faire repérer) : sans ce seuil, un risque même infime finit presque toujours par se déclencher sur une partie assez longue (1-(1-p)^n)
     darkForestMax: 0.1,
     projectileTurns: 32, // délai avant impact (8 ans)
     projectileCooldown: 40, // tours de répit après chaque vague de la forêt sombre
@@ -1433,8 +1434,10 @@
   function darkForestRisk(s) {
     if (s.darkForestCloaked || s.darkForestTriggerTurn == null || s.projectile || s.fleet) return 0;
     if (s.turn < s.projectileCooldownUntil) return 0;
+    const excessVis = tableVisibility(s) - CONFIG.darkForestSafeVisibility;
+    if (excessVis <= 0) return 0;
     const defended = s.projects.some((pr) => pr.type === "armada" && pr.status === "achevé" && pr.mode === "défense");
-    return Math.min(CONFIG.darkForestMax, CONFIG.darkForestPerVis * tableVisibility(s)) * (defended ? 0.5 : 1);
+    return Math.min(CONFIG.darkForestMax, CONFIG.darkForestPerVis * excessVis) * (defended ? 0.5 : 1);
   }
 
   function darkForest(s) {

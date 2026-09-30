@@ -96,7 +96,9 @@ function forestLabel() {
   if (S.projectile) return `<strong class="bad">projectile : impact dans ${S.projectile.arrival - S.turn} tours</strong>`;
   if (S.fleet) return `<strong class="bad">flotte extraterrestre (force ${S.fleet.strength}) ${S.turn < S.fleet.arrival ? `dans ${S.fleet.arrival - S.turn} tours` : "dans le système"}</strong>`;
   if (S.darkForestTriggerTurn == null) return `<span class="muted">pas encore visible (jalon : ${MILESTONES.find((m) => m.id === CONFIG.darkForestTrigger).name})</span>`;
-  return `${S.sunDestroyed ? `<span class="bad">Soleil détruit</span> · ` : ""}<strong class="warn">${(Game.darkForestRisk(S) * 100).toFixed(1)} %/tour</strong> <span class="muted">(visibilité de la table ${fmt(Game.tableVisibility(S))})</span>`;
+  const vis = Game.tableVisibility(S);
+  const safe = vis <= CONFIG.darkForestSafeVisibility;
+  return `${S.sunDestroyed ? `<span class="bad">Soleil détruit</span> · ` : ""}<strong class="${safe ? "good" : "warn"}">${(Game.darkForestRisk(S) * 100).toFixed(1)} %/tour</strong> <span class="muted">(visibilité de la table ${fmt(vis)}${safe ? `, sous le seuil de discrétion (${CONFIG.darkForestSafeVisibility}) : risque nul` : `, seuil de discrétion ${CONFIG.darkForestSafeVisibility}`})</span>`;
 }
 
 function sparkline(id) {
