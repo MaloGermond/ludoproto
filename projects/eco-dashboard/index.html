@@ -30,7 +30,13 @@
       <div class="action-grid">
         <form id="f-research" class="box">
           <h3>Recherche</h3>
-          <p class="muted">Chaque chercheur affecté coûte de l'argent chaque tour tant que la recherche est en cours (plein tarif le 1ᵉʳ tour, réduit ensuite). Un tour infructueux n'est pas remboursé.</p>
+          <p class="muted">Outillage payé une fois par techno (argent + métaux), puis salaire de chaque chercheur à chaque tour, affecté ou non. L'expérience (paliers à 2 et 4 tours sur la même recherche) augmente la chance ; retirer un chercheur d'une recherche en cours la lui fait perdre.</p>
+          <div class="row">
+            <label>Équipe <input name="hireQty" type="number" min="1" value="1" /></label>
+            <button type="button" data-act="hire">Embaucher</button>
+            <button type="button" data-act="fire">Licencier</button>
+          </div>
+          <p class="hint" data-hint="staff"></p>
           <div class="row">
             <select name="tech"></select>
             <label>Chercheurs <input name="researchers" type="number" min="1" value="2" /></label>
@@ -55,6 +61,10 @@
             <button type="submit">Construire</button>
           </div>
           <p class="hint" data-hint="build"></p>
+          <div class="row">
+            <select name="infra"></select>
+            <button type="button" data-act="dismantle">Démanteler</button>
+          </div>
         </form>
 
         <form id="f-market" class="box">
@@ -70,6 +80,10 @@
             <button type="submit">Acheter</button>
           </div>
           <p class="hint" data-hint="market"></p>
+          <div class="row">
+            <label>Droit de ravitaillement <input name="fuelFee" type="number" min="0" value="4" /> ₵/ergol</label>
+            <button type="button" data-act="fuel">Fixer</button>
+          </div>
         </form>
 
         <form id="f-trade" class="box wide">
@@ -82,7 +96,7 @@
             <fieldset data-side="give">
               <legend>Je donne</legend>
               <label>₵ <input name="money" type="number" min="0" value="0" /></label>
-              <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+              <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
               <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
               <label>Licence <select name="tech"></select></label>
               <label>Parts de <select name="shareCo"></select> <input name="shareQty" type="number" min="0" value="0" /></label>
@@ -90,7 +104,7 @@
             <fieldset data-side="want">
               <legend>Je demande</legend>
               <label>₵ <input name="money" type="number" min="0" value="0" /></label>
-              <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+              <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
               <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
               <label>Licence <select name="tech"></select></label>
               <label>Parts de <select name="shareCo"></select> <input name="shareQty" type="number" min="0" value="0" /></label>
@@ -110,7 +124,7 @@
           </div>
           <div class="row">
             <label>₵ <input name="money" type="number" min="0" value="20" /></label>
-            <label>Matière <input name="material" type="number" min="0" value="0" /></label>
+            <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
           </div>
           <div class="row">
             <label>Rembourser <input name="repay" type="number" min="0" value="25" /> ₵</label>
@@ -130,6 +144,42 @@
           <p class="hint" data-hint="buyout"></p>
         </form>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>Menaces et projets communs</h2>
+      <div id="threats"></div>
+      <div class="action-grid">
+        <form id="f-project" class="box wide">
+          <h3>Projet commun</h3>
+          <p class="muted">Tout le monde peut verser : la propriété suit les apports, le plus gros contributeur contrôle. Une promesse est visible mais n'engage à rien.</p>
+          <div class="row">
+            <select name="type"></select>
+            <select name="zone"></select>
+            <button type="button" data-act="create">Lancer</button>
+          </div>
+          <p class="hint" data-hint="project-type"></p>
+          <div class="row">
+            <label>Projet <select name="project"></select></label>
+            <label>Promettre <input name="pledge" type="number" min="0" value="100" /> ₵</label>
+            <button type="button" data-act="pledge">Promettre</button>
+          </div>
+          <div class="row">
+            <label>₵ <input name="money" type="number" min="0" value="0" /></label>
+            <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
+            <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
+            <button type="submit">Verser</button>
+          </div>
+          <div class="row">
+            <label>Armada <select name="mode"><option value="défense">défense</option><option value="conquête">conquête</option><option value="exploration">exploration</option></select></label>
+            <button type="button" data-act="mode">Changer de mode</button>
+            <label>Cible <select name="target"></select></label>
+            <button type="button" data-act="attack">Attaquer</button>
+          </div>
+          <p class="hint" data-hint="project"></p>
+        </form>
+      </div>
+      <div id="projects"></div>
     </section>
 
     <section class="panel two-col">

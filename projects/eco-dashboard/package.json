@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "serve . -l 3001",
     "build": "echo \"static dashboard, nothing to build\"",
-    "sim": "node sim.js"
+    "sim": "node sim.js",
+    "check": "node check-tree.js"
   },
   "devDependencies": {
     "serve": "^14.2.1"

@@ -2,7 +2,7 @@
 // Hot-seat : on choisit "en tant que" qui l'on agit ; les joueurs non
 // humains sont joués par une stratégie automatique à la fin du tour.
 
-const { RARES, ZONES, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, CONFIG } = Game;
+const { RARES, MATERIAL, ZONES, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, AGES, PROJECTS, CONFIG } = Game;
 const { STRATEGIES } = Strategies;
 
 let S = null;
@@ -64,6 +64,8 @@ function render() {
   renderStatus();
   renderPlayers();
   renderActions();
+  renderThreats();
+  renderProjects();
   renderOffers();
   renderLoans();
   renderRelations();
@@ -78,20 +80,23 @@ function meter(value, max, color) {
 
 function renderStatus() {
   const planetColor = S.planet > 60 ? "var(--good)" : S.planet > 30 ? "var(--warn)" : "var(--bad)";
-  const risk = Game.darkForestRisk(S);
-  const triggerName = Game.MILESTONES.find((m) => m.id === CONFIG.darkForestTrigger).name;
-  const forestLabel =
-    S.darkForestTriggerTurn == null
-      ? `<span class="muted">pas encore visible (jalon : ${triggerName})</span>`
-      : `<strong class="warn">${Math.round(risk * 100)} %</strong>`;
   $("#status").innerHTML = `
     <span>Tour <strong>${S.turn}</strong> / ${CONFIG.maxTurns}</span>
-    <span>Planète ${meter(S.planet, CONFIG.planetHealth, planetColor)} ${fmt(S.planet)} <span class="muted">(pollution ${fmt(S.lastPollution || 0)} − régén. ${CONFIG.pollutionRegen}/tour)</span></span>
-    <span>Forêt sombre ${forestLabel}</span>`;
+    <span>Âge <strong>${AGES[S.age].name}</strong></span>
+    <span>Planète ${S.sunDestroyed ? `<strong class="bad">détruite</strong>` : `${meter(S.planet, CONFIG.planetHealth, planetColor)} ${fmt(S.planet)} <span class="muted">(pollution terrestre ${fmt(S.lastPollution || 0)} − régén. ${CONFIG.pollutionRegen}/tour)</span>`}</span>
+    <span>Forêt sombre ${forestLabel()}</span>`;
   const end = $("#ending");
   end.hidden = !S.ended;
   if (S.ended) end.textContent = `🏁 ${S.ended.text}`;
   $("#btn-end").disabled = $("#btn-sim").disabled = $("#btn-sim-end").disabled = !!S.ended;
+}
+
+function forestLabel() {
+  if (S.darkForestCloaked) return `<span class="good">camouflage galactique</span>`;
+  if (S.sunDestroyed) return `<span class="bad">le Soleil a explosé</span>`;
+  if (S.projectile) return `<strong class="bad">projectile : impact dans ${S.projectile.arrival - S.turn} tours</strong>`;
+  if (S.darkForestTriggerTurn == null) return `<span class="muted">pas encore visible (jalon : ${MILESTONES.find((m) => m.id === CONFIG.darkForestTrigger).name})</span>`;
+  return `<strong class="warn">${(Game.darkForestRisk(S) * 100).toFixed(1)} %/tour</strong> <span class="muted">(visibilité de la table ${fmt(Game.tableVisibility(S))})</span>`;
 }
 
 function sparkline(id) {
@@ -125,8 +130,12 @@ function renderPlayers() {
         .map((r) => `${p.rares[r]} ${RARES[r]} <span class="muted">@${p.prices[r]}</span>`)
         .join("<br>") || `<span class="muted">aucune</span>`;
       const infras = p.infras
-        .map((i) => `<li>${INFRA[i.type].name} · ${Game.zone(i.zone).name} · ${i.hp}/${INFRA[i.type].hp}${i.mode === "agressif" ? ` · <span class="bad">agressif</span>` : ""}</li>`)
+        .map((i) => `<li>${INFRA[i.type].name} · ${Game.zone(i.zone).name}${Game.zone(i.zone).inner ? "" : " ✦"} · ${i.hp}/${INFRA[i.type].hp}${i.mode === "agressif" ? ` · <span class="bad">agressif</span>` : ""}</li>`)
         .join("");
+      const research = [...new Set(p.staff.filter((r) => r.tech).map((r) => r.tech))]
+        .map((t) => `${TECHS[t].name} (${Game.staffOn(p, t).length}, ${Math.round(Game.researchChance(t, Game.effectiveResearchers(p, t)) * 100)} %)`)
+        .join(", ");
+      const levels = [0, 1, 2].map((l) => p.staff.filter((r) => Game.xpLevel(r) === l).length);
       const holders = Object.entries(p.shares)
         .filter(([h]) => +h !== p.id)
         .map(([h, n]) => `${P(h).name} ${n}`)
@@ -145,14 +154,13 @@ function renderPlayers() {
           <strong>${p.name}</strong>
           <select data-strategy="${p.id}" title="${esc(STRATEGIES[p.strategy].desc)}">${strat}</select>
         </header>
-        <div class="muted">Base : ${Game.zone(p.home).name}</div>
+        <div class="muted">${Game.zone(p.home).name} · ${Strategies.POSTURE[p.strategy] ? `posture : ${Strategies.POSTURE[p.strategy]}` : "joué à la main"}</div>
         <div>${statusBadges(p)}</div>
         <dl>
           <dt>Argent</dt><dd class="${p.money < 0 ? "bad" : ""}">${fmt(p.money)} ₵</dd>
-          <dt>Matière</dt><dd>${fmt(p.material)}</dd>
-          <dt>Recherche</dt><dd>${
-            Object.entries(p.assignments).map(([t, a]) => `${TECHS[t].name} (${a.researchers} chercheur(s))`).join(", ") || "—"
-          }</dd>
+          <dt>${MATERIAL}</dt><dd>${fmt(p.material)}</dd>
+          <dt>Chercheurs</dt><dd>${p.staff.length} / ${Game.labCapacity(p)} <span class="muted">(novices ${levels[0]}, confirmés ${levels[1]}, experts ${levels[2]})</span></dd>
+          <dt>Recherche</dt><dd>${research || "—"}</dd>
           <dt>Rares</dt><dd>${rares}</dd>
           <dt>Valeur</dt><dd>${fmt(Game.equity(S, p))} <span class="muted">(${Game.sharePrice(S, p).toFixed(2)} ₵/part)</span></dd>
           <dt>Dette</dt><dd>${debt ? `<span class="bad">${debt} ₵</span>` : "—"}${recv ? ` <span class="muted">/ créances ${recv} ₵</span>` : ""}</dd>
@@ -162,7 +170,7 @@ function renderPlayers() {
           <dt>Actionnaires</dt><dd>${holders || "—"}</dd>
           <dt>Détient</dt><dd>${owned || "—"}</dd>
         </dl>
-        <div class="muted">Infrastructures (${p.infras.length})</div>
+        <div class="muted">Infrastructures (${p.infras.length}) — ✦ planète extérieure</div>
         <ul>${infras || "<li class='muted'>aucune</li>"}</ul>
         ${sparkline(p.id)}
       </article>`;
@@ -178,31 +186,42 @@ function renderActions() {
   const others = S.players.filter((p) => p.id !== actor && Game.isActive(p)).map((p) => [p.id, p.name]);
   fillSelect($("#actor"), everyone);
   $("#actor").value = actor;
-  $("#actor-summary").textContent = `${fmt(me.money)} ₵ · ${fmt(me.material)} matière${me.strategy !== "humain" ? " · ⚠ joué par une stratégie à la fin du tour" : ""}`;
+  $("#actor-summary").textContent = `${fmt(me.money)} ₵ · ${fmt(me.material)} ${MATERIAL.toLowerCase()} · ${me.staff.length} chercheur(s)${me.strategy !== "humain" ? " · ⚠ joué par une stratégie à la fin du tour" : ""}`;
 
-  // recherche : liste des technos dont les prérequis sont remplis
+  // recherche : technos dont les prérequis sont remplis (un seul suffit pour une recherche collective)
   const fr = $("#f-research");
+  const idle = me.staff.filter((r) => !r.tech).length;
+  $("[data-hint=staff]").textContent = `${me.staff.length} chercheur(s) dont ${idle} inactif(s) · capacité ${Game.labCapacity(me)} (${CONFIG.labCapacity} par laboratoire) · embauche ${CONFIG.hireCost} ₵ · salaire ${CONFIG.salary} ₵/tour · indemnité ${CONFIG.severance} ₵ × (1 + palier)`;
   const available = Object.keys(TECHS)
-    .filter((t) => !Game.hasTech(me, t) && TECHS[t].prereqs.every((r) => Game.hasTech(me, r)))
+    .filter((t) => !Game.hasTech(me, t) && Game.canResearch(me, t))
     .sort((a, b) => TECH_CATEGORIES[TECHS[a].category].localeCompare(TECH_CATEGORIES[TECHS[b].category]) || TECHS[a].cost - TECHS[b].cost);
   fillSelect(
     fr.tech,
-    available.map((t) => [
-      t,
-      `[${TECH_CATEGORIES[TECHS[t].category]}] ${TECHS[t].name} — ${TECHS[t].cost} ₵/chercheur, ${Math.round(TECHS[t].chance * 100)} %/tour`,
-    ])
+    available.map((t) => {
+      const tool = Game.toolingCost(me, t);
+      const cost = TECHS[t].pooled ? "collective" : me.tooled[t] ? "outillage installé" : `outillage ${tool.money} ₵ + ${tool.material} ${MATERIAL.toLowerCase()}`;
+      return [t, `[${TECH_CATEGORIES[TECHS[t].category]}] ${TECHS[t].name} — ${cost}, ${(TECHS[t].chance * 100).toFixed(1)} %/chercheur`];
+    })
   );
   const selected = fr.tech.value;
-  const activeAssignment = me.assignments[selected];
-  $("[data-hint=tech]").textContent = !selected
-    ? available.length
-      ? ""
-      : "Aucune technologie accessible pour l'instant (prérequis manquants)"
-    : `${TECHS[selected].desc ? TECHS[selected].desc + " · " : ""}coût ce tour : ${Game.researchCostPerHead(me, selected)} ₵/chercheur${
-        activeAssignment ? ` (déjà ${activeAssignment.researchers} affecté(s))` : " (mise en place)"
-      }`;
-  const assignedList = Object.entries(me.assignments)
-    .map(([t, a]) => `${TECHS[t].name} (${a.researchers} chercheur(s))`)
+  if (!selected) $("[data-hint=tech]").textContent = available.length ? "" : "Aucune technologie accessible pour l'instant (prérequis manquants)";
+  else {
+    const equip = Game.equipmentCost(me, selected);
+    const n = Game.staffOn(me, selected).length;
+    const k = TECHS[selected].pooled ? Game.pooledKnowledge(S, selected) : null;
+    const chance = k ? k.chance : Game.researchChance(selected, Game.effectiveResearchers(me, selected));
+    $("[data-hint=tech]").textContent = [
+      TECHS[selected].desc,
+      Object.keys(equip).length && !me.tooled[selected] ? `équipement : ${Game.describeBundle(S, { money: 0, material: 0, rares: equip })}` : "",
+      n ? `${n} chercheur(s) affecté(s), ${Math.round(chance * 100)} % ce tour` : "",
+      k && k.missing.length ? `il manque à la table : ${k.missing.map((r) => TECHS[r].name).join(", ")}` : "",
+      k && !k.tooled ? "aucun chantier de distorsion achevé" : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const assignedList = [...new Set(me.staff.filter((r) => r.tech).map((r) => r.tech))]
+    .map((t) => `${TECHS[t].name} (${Game.staffOn(me, t).length})`)
     .join(", ");
   $("[data-hint=research-active]").textContent = assignedList ? `En cours : ${assignedList}` : "";
 
@@ -214,10 +233,11 @@ function renderActions() {
     ZONES.map((z) => {
       const locked = z.reachTech && !Game.hasTech(me, z.reachTech);
       const neigh = S.players.filter((p) => p !== me && Game.isActive(p) && p.infras.some((i) => i.zone === z.id)).map((p) => p.name);
-      const mult = 1 + z.tier * 0.4;
+      const mult = 1 + z.tier * CONFIG.distanceCost;
+      const yields = Object.keys(z.yield).map((r) => RARES[r]).join(", ");
       return [
         z.id,
-        `${z.name}${z.rare ? ` (${RARES[z.rare]})` : ""} — coût ×${mult.toFixed(1)}${locked ? ` 🔒 ${TECHS[z.reachTech].name}` : ""}${neigh.length ? ` — voisins : ${neigh.join(", ")}` : ""}`,
+        `${Game.zoneOpen(S, z) ? "" : "💥 "}${z.name}${yields ? ` (${yields})` : ""}${z.inner ? "" : " ✦"} — ×${mult.toFixed(1)}${locked ? ` 🔒 ${TECHS[z.reachTech].name}` : ""}${neigh.length ? ` — voisins : ${neigh.join(", ")}` : ""}`,
       ];
     })
   );
@@ -226,20 +246,39 @@ function renderActions() {
     Object.keys(INFRA)
       .filter((k) => INFRA[k].buildable !== false)
       .map((k) => {
-        const c = Game.buildCost(k, fb.zone.value);
+        const c = Game.buildCost(me, k, fb.zone.value);
         const rares = Object.entries(c.rares).map(([r, n]) => ` + ${n} ${RARES[r]}`).join("");
-        return [k, `${INFRA[k].name} (${c.money} ₵ + ${c.material} mat.${rares})${INFRA[k].tech && !Game.hasTech(me, INFRA[k].tech) ? " 🔒" : ""}`];
+        return [k, `${INFRA[k].name} (${c.money} ₵ + ${c.material} mét.${rares})${c.heavyLaunch ? " ×3 lancement" : c.local ? " sur place" : ""}${INFRA[k].tech && !Game.hasTech(me, INFRA[k].tech) ? " 🔒" : ""}`];
       })
   );
   const zoneLocked = Game.zone(fb.zone.value).reachTech && !Game.hasTech(me, Game.zone(fb.zone.value).reachTech);
   const d = INFRA[fb.type.value];
-  const prod = Object.entries(d.prod).map(([k, v]) => `+${v} ${{ money: "₵", material: "matière", research: "pts", zoneRare: "rare de la zone" }[k] || k}`);
-  const zoneWarning = zoneLocked ? `⚠ Trop loin : nécessite ${TECHS[Game.zone(fb.zone.value).reachTech].name} · ` : "";
-  $("[data-hint=build]").textContent = `${zoneWarning}${prod.join(", ")} / tour · pollution ${d.pollution} · visibilité ${d.visibility}${d.upkeep ? ` · consomme ${Object.entries(d.upkeep).map(([r, n]) => `${n} ${RARES[r]}`).join(", ")} / tour` : ""} · entretien ${CONFIG.maintenance} ₵/tour`;
+  const z = Game.zone(fb.zone.value);
+  const prod = Object.entries(d.prod).map(([k, v]) =>
+    k === "zoneYield" ? Object.entries(z.yield).map(([r, n]) => `+${n} ${RARES[r]}`).join(", ") || "rien ici" : k === "material" ? `+${v * (fb.type.value === "mine" ? z.metals : 1)} ${MATERIAL.toLowerCase()}` : `+${v} ${{ money: "₵", ergols: "ergols" }[k] || k}`
+  );
+  const zoneWarning = zoneLocked ? `⚠ Trop loin : nécessite ${TECHS[z.reachTech].name} · ` : "";
+  const station = Game.fuelStationFor(S, me, z.id);
+  $("[data-hint=build]").textContent = [
+    zoneWarning + (d.desc || ""),
+    `${prod.join(", ") || "aucune production"} / tour`,
+    `pollution ${z.id === "terre" ? d.pollution : `0 (lancement : ${fmt(z.tier * CONFIG.launchPollution)} une fois)`}`,
+    `visibilité ${d.visibility}`,
+    d.upkeep ? `consomme ${Object.entries(d.upkeep).map(([r, n]) => `${n} ${RARES[r]}`).join(", ")} / tour` : "",
+    `entretien ${CONFIG.maintenance} ₵/tour`,
+    station ? `station de ${station.name} : ergols à ${station.fuelFee} ₵` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  fillSelect(
+    fb.infra,
+    me.infras.filter((i) => i.type !== "base").map((i) => [i.id, `${INFRA[i.type].name} · ${Game.zone(i.zone).name}${i.zone === "terre" ? ` (pollution ${INFRA[i.type].pollution})` : ""}`])
+  );
 
   // marché
   const fm = $("#f-market");
-  fillSelect(fm.rare, [["material", "Matière première"], ...Object.entries(RARES)]);
+  fillSelect(fm.rare, [["material", MATERIAL], ...Object.entries(RARES)]);
+  if (document.activeElement !== fm.fuelFee) fm.fuelFee.value = me.fuelFee;
   const isMaterial = fm.rare.value === "material";
   if (document.activeElement !== fm.price) fm.price.value = isMaterial ? me.materialPrice : me.prices[fm.rare.value];
   fillSelect(
@@ -253,8 +292,29 @@ function renderActions() {
       )
   );
   $("[data-hint=market]").textContent = isMaterial
-    ? `Prix moyen matière première : ${fmt(Game.materialPrice(S))} ₵`
+    ? `Prix moyen des ${MATERIAL.toLowerCase()} : ${fmt(Game.materialPrice(S))} ₵`
     : `Prix moyen ${RARES[fm.rare.value]} : ${fmt(Game.marketPrice(S, fm.rare.value))} ₵`;
+
+  // projets communs
+  const fp = $("#f-project");
+  fillSelect(fp.type, Object.entries(PROJECTS).map(([k, v]) => [k, `${v.name} (${Game.describeBundle(S, Game.normBundle(v.cost))})`]));
+  fillSelect(fp.zone, ZONES.filter((z) => Object.keys(z.yield).length && Game.zoneOpen(S, z)).map((z) => [z.id, z.name]));
+  fp.zone.disabled = !PROJECTS[fp.type.value].zone;
+  $("[data-hint=project-type]").textContent = PROJECTS[fp.type.value].desc;
+  fillSelect(
+    fp.project,
+    S.projects.filter((pr) => pr.status === "en cours" || pr.type === "armada").map((pr) => [pr.id, `${pr.name}${pr.zone ? ` (${Game.zone(pr.zone).name})` : ""} #${pr.id} — ${pr.status}`])
+  );
+  fillSelect(fp.rare, Object.entries(RARES).map(([r, n]) => [r, `${n} (${me.rares[r] || 0})`]));
+  fillSelect(fp.target, others);
+  const pr = S.projects.find((x) => x.id === +fp.project.value);
+  $("[data-hint=project]").textContent = !pr
+    ? "Aucun projet en cours"
+    : pr.status === "en cours"
+      ? `Reste à financer : ${Game.describeBundle(S, Game.projectRemaining(pr))}`
+      : pr.type === "armada"
+        ? `Armada de ${P(pr.controller).name}, mode ${pr.mode}, force ${Game.armadaStrength(S, pr)}`
+        : "";
 
   // troc
   const ft = $("#f-trade");
@@ -319,6 +379,8 @@ function bindActions() {
   };
   $("[data-act=stop]", fr).onclick = () => run(() => Game.assignResearch(S, actor, fr.tech.value, 0));
   fr.tech.onchange = renderActions;
+  $("[data-act=hire]", fr).onclick = () => run(() => Game.hire(S, actor, fr.hireQty.value));
+  $("[data-act=fire]", fr).onclick = () => run(() => Game.fire(S, actor, fr.hireQty.value));
 
   const fb = $("#f-build");
   fb.onsubmit = (e) => {
@@ -327,6 +389,7 @@ function bindActions() {
   };
   fb.type.onchange = renderActions;
   fb.zone.onchange = renderActions;
+  $("[data-act=dismantle]", fb).onclick = () => run(() => Game.dismantle(S, actor, fb.infra.value));
 
   const fm = $("#f-market");
   fm.onsubmit = (e) => {
@@ -338,10 +401,24 @@ function bindActions() {
     run(() =>
       fm.rare.value === "material" ? Game.setMaterialPrice(S, actor, fm.price.value) : Game.setPrice(S, actor, fm.rare.value, fm.price.value)
     );
+  $("[data-act=fuel]", fm).onclick = () => run(() => Game.setFuelFee(S, actor, fm.fuelFee.value));
   fm.rare.onchange = () => {
     const me = P(actor);
     fm.price.value = fm.rare.value === "material" ? me.materialPrice : me.prices[fm.rare.value];
     renderActions();
+  };
+
+  const fp = $("#f-project");
+  fp.type.onchange = renderActions;
+  fp.project.onchange = renderActions;
+  $("[data-act=create]", fp).onclick = () => run(() => Game.createProject(S, actor, fp.type.value, fp.zone.value));
+  $("[data-act=pledge]", fp).onclick = () => run(() => Game.pledge(S, actor, +fp.project.value, fp.pledge.value));
+  $("[data-act=mode]", fp).onclick = () => run(() => Game.setArmadaMode(S, actor, +fp.project.value, fp.mode.value));
+  $("[data-act=attack]", fp).onclick = () => run(() => Game.attack(S, actor, +fp.project.value, +fp.target.value));
+  fp.onsubmit = (e) => {
+    e.preventDefault();
+    const rares = +fp.rareQty.value > 0 ? { [fp.rare.value]: +fp.rareQty.value } : {};
+    run(() => Game.contribute(S, actor, +fp.project.value, { money: fp.money.value, material: fp.material.value, rares }));
   };
 
   const ft = $("#f-trade");
@@ -388,6 +465,66 @@ function bindActions() {
 
   $("#log-filter").onchange = renderLog;
   $("#log-type").onchange = renderLog;
+}
+
+// ------------------------------------------------ menaces et projets
+
+function renderThreats() {
+  const k = Game.pooledKnowledge(S, "PRO-10");
+  const deflector = S.players.find((p) => Game.hasTech(p, "PRO-10"));
+  const invaders =
+    S.age === "late" && S.darkForestTriggerTurn != null && !S.darkForestCloaked
+      ? `vague ${S.invaderWaves + 1} (force ${CONFIG.invaderBase + CONFIG.invaderGrowth * S.invaderWaves})${S.invaderNext != null ? ` au tour ${S.invaderNext}` : ""}`
+      : S.age === "late"
+        ? "aucun (humanité jamais repérée, ou camouflée)"
+        : "late game seulement";
+  const ages = Object.keys(AGES).map((a) => `${S.ageTurns[a] ? `<strong>${AGES[a].name}</strong> dès T${S.ageTurns[a]}` : `<span class="muted">${AGES[a].name}</span>`}`).join(" → ");
+  $("#threats").innerHTML = `
+    <p>${ages}</p>
+    <table>
+      <tr><th>Forêt sombre</th><td>${forestLabel()}${S.projectiles ? ` · ${S.projectiles} projectile(s), ${S.deviations} dévié(s)` : ""}</td></tr>
+      <tr><th>Distorsion (PRO-10)</th><td>${
+        deflector
+          ? `<span class="good">maîtrisée par ${S.players.filter((p) => Game.hasTech(p, "PRO-10")).map((p) => p.name).join(", ")}</span>`
+          : `participants : ${k.parts.map((p) => p.name).join(", ") || "aucun"} · ${fmt(k.eff)} chercheurs équivalents · ${
+              k.missing.length ? `<span class="warn">il manque ${k.missing.map((r) => TECHS[r].name).join(", ")}</span>` : "savoir réuni"
+            } · ${k.tooled ? "chantier de distorsion achevé" : `<span class="warn">pas de chantier de distorsion</span>`} · <strong>${Math.round(k.chance * 100)} %/tour</strong>`
+      }</td></tr>
+      <tr><th>Envahisseurs</th><td>${invaders}</td></tr>
+      <tr><th>Repli possible</th><td>${
+        S.players
+          .filter(Game.isActive)
+          .map((p) => {
+            const outer = p.infras.filter((i) => !Game.zone(i.zone).inner).length;
+            return `${p.name} : ${outer ? `<span class="good">${outer} infra(s) extérieure(s)</span>` : ZONES.some((z) => !z.inner && Game.hasTech(p, z.reachTech)) ? "à portée" : `<span class="muted">hors de portée</span>`}`;
+          })
+          .join(" · ")
+      }</td></tr>
+    </table>`;
+}
+
+function renderProjects() {
+  if (!S.projects.length) {
+    $("#projects").innerHTML = `<p class="muted">Aucun projet commun lancé.</p>`;
+    return;
+  }
+  $("#projects").innerHTML = `<table>
+    <tr><th>Projet</th><th>Statut</th><th>Apports (valeur)</th><th>Promesses</th><th>Reste / contrôle</th></tr>
+    ${[...S.projects]
+      .reverse()
+      .map((pr) => {
+        const contrib = Object.entries(pr.contrib).map(([id, v]) => `${P(id).name} ${Math.round(v)}${pr.status === "achevé" ? ` (${Math.round(Game.projectShare(pr, +id) * 100)} %)` : ""}`).join(", ");
+        const pledges = Object.entries(pr.pledges)
+          .map(([id, v]) => {
+            const paid = pr.contrib[id] || 0;
+            return `<span class="${paid >= v ? "good" : "warn"}">${P(id).name} ${v} (versé ${Math.round(paid)})</span>`;
+          })
+          .join(", ");
+        const tail = pr.status === "en cours" ? Game.describeBundle(S, Game.projectRemaining(pr)) : pr.type === "armada" ? `${P(pr.controller).name} — mode ${pr.mode}, force ${Game.armadaStrength(S, pr)}` : P(pr.controller).name;
+        return `<tr><td>${pr.name}${pr.zone ? ` · ${Game.zone(pr.zone).name}` : ""} <span class="muted">#${pr.id}, T${pr.turn}</span></td><td>${pr.status}</td><td>${contrib || "—"}</td><td>${pledges || "—"}</td><td>${tail}</td></tr>`;
+      })
+      .join("")}
+  </table>`;
 }
 
 // --------------------------------------------------- offres et prêts
@@ -514,12 +651,16 @@ function renderIndicators() {
   const conflicts = S.log.filter((l) => l.type === "conflit");
   const voluntary = conflicts.filter((l) => l.text.includes("volontairement")).length;
   const accidental = conflicts.filter((l) => l.text.includes("accidentellement")).length;
-  const forest = S.log.filter((l) => l.type === "forêt sombre").length;
+  const broken = S.log.filter((l) => l.type === "trahison");
   const claimsAccepted = claims.filter((o) => o.status === "acceptée").length;
 
   // 4. spécialisation
-  const techRows = Object.keys(TECHS)
-    .map((t) => `<tr><th>${TECHS[t].name}</th>${ps.map((p) => `<td>${Game.hasTech(p, t) ? "●" : ""}</td>`).join("")}</tr>`)
+  // technos possédées par branche : une spécialisation se lit en colonnes déséquilibrées
+  const techRows = Object.entries(TECH_CATEGORIES)
+    .map(([c, name]) => {
+      const total = Object.values(TECHS).filter((t) => t.category === c).length;
+      return `<tr><th>${name} <span class="muted">/${total}</span></th>${ps.map((p) => `<td>${p.techs.filter((t) => TECHS[t].category === c).length || ""}</td>`).join("")}</tr>`;
+    })
     .join("");
   const bought = (p) => S.trades.filter((t) => t.buyer === p.id).reduce((x, t) => x + t.qty, 0);
 
@@ -549,9 +690,23 @@ function renderIndicators() {
     </div>
     <div>
       <h3>Le conflit opportuniste : dynamique ou frustration ?</h3>
-      <p>Incidents : <strong class="bad">${voluntary}</strong> volontaires · <strong>${accidental}</strong> accidentels · forêt sombre : ${forest} frappes</p>
+      <p>Incidents : <strong class="bad">${voluntary}</strong> volontaires · <strong>${accidental}</strong> accidentels · attaques d'armada : ${S.log.filter((l) => l.type === "armada" && l.text.includes("attaque")).length}</p>
       <p>Demandes de compensation : ${claims.length} (${claimsAccepted} acceptées, ${claims.filter((o) => o.status === "refusée").length} refusées)</p>
       <p class="muted">Voir la matrice « qui lèse qui » : ⚔ causés vs subis, puis les échanges qui suivent (représailles, compensation, silence).</p>
+    </div>
+    <div>
+      <h3>Coopérer ou se replier face à la forêt sombre ?</h3>
+      <p>Projectiles : ${S.projectiles} · déviés : ${S.deviations} · Soleil ${S.sunDestroyed ? `<strong class="bad">détruit</strong>` : "intact"}</p>
+      <table><tr><th></th><th>Chercheurs sur PRO-10</th><th>Versé aux projets</th><th>Promis non versé</th><th>Infras extérieures</th></tr>
+        ${ps
+          .map((p) => {
+            const paid = S.projects.reduce((a, pr) => a + (pr.contrib[p.id] || 0), 0);
+            const unpaid = S.projects.reduce((a, pr) => a + Math.max(0, (pr.pledges[p.id] || 0) - (pr.contrib[p.id] || 0)), 0);
+            return `<tr><th>${p.name}</th><td class="num">${Game.staffOn(p, "PRO-10").length}</td><td class="num">${Math.round(paid)}</td><td class="num ${unpaid ? "warn" : ""}">${Math.round(unpaid)}</td><td class="num">${p.infras.filter((i) => !Game.zone(i.zone).inner).length}</td></tr>`;
+          })
+          .join("")}
+      </table>
+      <p class="muted">${broken.length} promesse(s) non tenue(s) à l'achèvement d'un projet.</p>
     </div>
     <div>
       <h3>La spécialisation émerge-t-elle ?</h3>
