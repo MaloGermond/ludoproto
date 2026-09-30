@@ -52,6 +52,13 @@ const SNAP_PULL = 0.08; // fraction de l'écart corrigée par frame (effet doux)
 // manœuvre. Ce temps de rotation retarde d'autant le début de la poussée.
 const AUTOPILOT_SLEW_RATE = 1.2; // rad/s
 
+// atterrissage guidé : le moteur s'allume quand la décélération nécessaire
+// pour s'arrêter au sol atteint cette fraction de la poussée maximale
+// ("suicide burn"), puis la poussée est dosée pour toucher le sol à l'arrêt
+const LANDING_IGNITION = 0.85;
+const LANDING_MAX_TILT = 0.35; // rad — inclinaison max pour annuler la dérive horizontale
+const LANDING_TIMEOUT = 3000; // s — garde-fou pour la vérification d'un atterrissage
+
 // prédiction
 const PLAN_MAX_HORIZON = 20000; // s — garde-fou, le tracé s'arrête normalement bien avant
 const PLAN_TAIL = 60; // s — durée minimale de tracé après la dernière manœuvre
@@ -476,8 +483,32 @@ function createAutopilot(nodes) {
   };
 }
 
+// kind : undefined pour une manœuvre classique (rotation + poussée fixe),
+// "land" pour un atterrissage guidé
 function copyNode(n) {
-  return { id: n.id, t: n.t, heading: n.heading, power: n.power, duration: n.duration };
+  return { id: n.id, kind: n.kind, t: n.t, heading: n.heading, power: n.power, duration: n.duration };
+}
+
+// commande de l'atterrissage guidé : nez vers le haut (incliné pour annuler
+// la vitesse horizontale), poussée déclenchée au dernier moment et dosée
+// pour que vitesse de descente et altitude s'annulent ensemble
+function landingControl(s) {
+  const R = s.ref;
+  const r = Math.hypot(s.rx, s.ry);
+  const up = Math.atan2(s.ry, s.rx);
+  const h = r - (R.radius + SHIP_SIZE / 2);
+  const vRadial = (s.rx * s.rvx + s.ry * s.rvy) / r; // < 0 en descente
+  const vTangent = (s.rx * s.rvy - s.ry * s.rvx) / r;
+  const g = R.mu / (r * r);
+
+  const target = up + constrain(-vTangent * 0.05, -LANDING_MAX_TILT, LANDING_MAX_TILT);
+  const descent = Math.max(0, -vRadial);
+  const needed = (descent * descent) / (2 * Math.max(h - 1, 0.5)) + g;
+  let thrust = 0;
+  if (vRadial < 0 && needed > LANDING_IGNITION * THRUST_ACCEL) thrust = Math.min(1, needed / THRUST_ACCEL);
+  // pas de poussée tant que le vaisseau n'est pas orienté
+  if (Math.abs(angleDiff(s.angle, target)) > 0.3) thrust = 0;
+  return { ...COAST, slewTo: target, thrust };
 }
 
 function cloneAutopilot(ap) {
@@ -500,11 +531,30 @@ function autopilotControl(ap, s, t) {
 
     if (ap.phase === "pending") {
       if (t < node.t) return COAST;
-      ap.targetAngle = progradeAngle(s) + radians(node.heading);
+      if (node.kind === "land") {
+        ap.phase = "landing";
+        node.fuelBefore = s.fuel;
+        recordAt(node, "start", s, t);
+      } else {
+        ap.targetAngle = progradeAngle(s) + radians(node.heading);
       ap.phase = "rotating";
-      node.targetAngle = ap.targetAngle;
-      node.fuelBefore = s.fuel;
-      recordAt(node, "start", s, t);
+        node.targetAngle = ap.targetAngle;
+        node.fuelBefore = s.fuel;
+        recordAt(node, "start", s, t);
+      }
+    }
+
+    if (ap.phase === "landing") {
+      if (!s.landed) {
+        const control = landingControl(s);
+        if (control.thrust > 0 && node.burnStartT === undefined) recordAt(node, "burnStart", s, t);
+        return control;
+      }
+      recordAt(node, "end", s, t);
+      node.fuelAfter = s.fuel;
+      ap.index++;
+      ap.phase = "pending";
+      continue;
     }
 
     if (ap.phase === "rotating") {
@@ -1538,6 +1588,48 @@ function circularizeOrbit() {
   syncPanel();
 }
 
+// ajoute, après les manœuvres déjà prévues, un atterrissage sur l'astre
+// autour duquel le vaisseau se trouve alors : poussée qui annule la vitesse
+// relative (chute verticale), puis atterrissage guidé
+function planLanding() {
+  if (mode !== "planning" || ship.crashed) return;
+  const ctx = runCtx(makeCtx(ship, gameTime, planNodes), Infinity, (c) => !planDone(c));
+  const body = ctx.s.ref;
+  try {
+    if (ctx.s.crashed) throw new PlanError("Le plan actuel se termine par un crash.");
+    if (ctx.s.landed) throw new PlanError(`Déjà posé sur ${body.name} à la fin du plan.`);
+    if (!body.parentBody) throw new PlanError(`Impossible de se poser sur ${body.name}.`);
+    if (body.mu / (body.radius * body.radius) > LANDING_IGNITION * THRUST_ACCEL) {
+      throw new PlanError(`Gravité de ${body.name} trop forte pour le moteur.`);
+    }
+
+    const nodes = [];
+    let c = ctx;
+    const deorbit = makeBurnNode(ctx, ctx.t, (s) => ({ x: -s.rvx, y: -s.rvy }));
+    if (deorbit) c = commitNode(ctx, deorbit, nodes);
+    const land = { kind: "land", t: c.t, heading: 0, power: 1, duration: 0 };
+    c = cloneCtx(c);
+    land.id = nextNodeId++;
+    c.ap.nodes.push(copyNode(land));
+    nodes.push(land);
+    runCtx(c, c.t + LANDING_TIMEOUT, (cc) => !planDone(cc));
+    if (!c.s.landed || c.s.ref !== body) throw new PlanError(`L'atterrissage sur ${body.name} échoue (crash ou carburant).`);
+
+    planNodes.push(...nodes.map(copyNode));
+    planNodes.sort((a, b) => a.t - b.t);
+    selectedNodeId = land.id;
+    planDirty = true;
+    syncPanel();
+    routeMessage = {
+      text: `Atterrissage sur ${body.name} · Δv ${(ctx.s.fuel - c.s.fuel).toFixed(0)} · posé à ${formatT(c.t)}`,
+      error: false,
+    };
+  } catch (e) {
+    if (!(e instanceof PlanError)) console.error(e);
+    routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage.", error: true };
+  }
+}
+
 function deleteSelectedNode() {
   if (selectedNodeId === null) return;
   planNodes = planNodes.filter((n) => n.id !== selectedNodeId);
@@ -1675,6 +1767,7 @@ function setupUI() {
     launch: byId("btn-launch"),
     clear: byId("btn-clear"),
     circularize: byId("btn-circularize"),
+    land: byId("btn-land"),
     camera: byId("btn-camera"),
     warp: byId("btn-warp"),
     warpUp: byId("btn-warp-up"),
@@ -1696,6 +1789,7 @@ function setupUI() {
     outPower: byId("out-power"),
     outDuration: byId("out-duration"),
     info: byId("node-info"),
+    presets: document.querySelector("#node-panel .presets"),
   });
 
   // liste des destinations, satellites indentés sous leur planète
@@ -1719,6 +1813,7 @@ function setupUI() {
   onClick(ui.launch, launchPlan);
   onClick(ui.clear, clearPlan);
   onClick(ui.circularize, circularizeOrbit);
+  onClick(ui.land, planLanding);
   onClick(ui.remove, deleteSelectedNode);
   onClick(ui.camera, toggleCamera);
   onClick(ui.warpUp, () => changeWarp(1));
@@ -1765,7 +1860,8 @@ function formatT(t) {
   return `T+${Math.floor(dt / 60)} min ${Math.round(dt % 60)} s`;
 }
 
-function nodeDeltaV(n) {
+function nodeDeltaV(n, predicted) {
+  if (n.kind === "land") return predicted && predicted.fuelAfter !== undefined ? predicted.fuelBefore - predicted.fuelAfter : 0;
   return THRUST_ACCEL * n.power * n.duration;
 }
 
@@ -1779,6 +1875,8 @@ function updateUI(prediction) {
   ui.launch.textContent = planNodes.length ? "▶ Lancer le plan" : "▶ Reprendre";
   ui.circularize.hidden = !planning;
   ui.circularize.disabled = ship.crashed;
+  ui.land.hidden = !planning;
+  ui.land.disabled = ship.crashed;
   ui.targetPanel.hidden = !planning;
   ui.routeInfo.textContent = routeMessage.text;
   ui.routeInfo.classList.toggle("error", routeMessage.error);
@@ -1795,21 +1893,28 @@ function updateUI(prediction) {
   }
   ui.panel.hidden = false;
   const index = planNodes.indexOf(node);
-  ui.title.textContent = `Manœuvre ${index + 1}/${planNodes.length}`;
+  const landing = node.kind === "land";
+  ui.title.textContent = landing ? `Atterrissage ${index + 1}/${planNodes.length}` : `Manœuvre ${index + 1}/${planNodes.length}`;
+  for (const el of [ui.heading, ui.power, ui.duration]) el.closest("label").hidden = landing;
+  ui.presets.hidden = landing;
   ui.outTime.textContent = formatT(node.t);
   ui.outHeading.textContent = `${node.heading > 0 ? "+" : ""}${Math.round(node.heading)}°`;
   ui.outPower.textContent = `${Math.round(node.power * 100)} %`;
   ui.outDuration.textContent = `${node.duration.toFixed(2)} s`;
 
   const predicted = prediction && prediction.nodes.find((n) => n.id === node.id);
-  const lines = [`Δv ≈ ${nodeDeltaV(node).toFixed(1)}`];
+  const lines = [landing ? `Atterrissage guidé · Δv ≈ ${nodeDeltaV(node, predicted).toFixed(1)}` : `Δv ≈ ${nodeDeltaV(node).toFixed(1)}`];
   if (!predicted || predicted.startT === undefined) {
     lines.push("Non atteinte : le tracé s'arrête avant (impact ou horizon).");
   } else {
     const delay = predicted.startT - node.t;
     if (delay > 0.05) lines.push(`Démarre ${delay.toFixed(1)} s plus tard (manœuvre précédente).`);
     lines.push(`Référentiel : ${predicted.startRef.name}`);
-    if (predicted.burnStartT !== undefined) {
+    if (landing) {
+      if (predicted.burnStartT !== undefined) lines.push(`Allumage : ${formatT(predicted.burnStartT)}`);
+      if (predicted.endT !== undefined) lines.push(`Posé : ${formatT(predicted.endT)} · carburant ${predicted.fuelAfter.toFixed(0)}`);
+      else lines.push("Pas de contact prévu (crash ou horizon dépassé).");
+    } else if (predicted.burnStartT !== undefined) {
       lines.push(`Rotation : ${(predicted.burnStartT - predicted.startT).toFixed(1)} s`);
       if (predicted.endT !== undefined && node.power > 0 && node.duration > 0) {
         lines.push(`Poussée : ${formatT(predicted.burnStartT)} → ${formatT(predicted.endT)}`);
@@ -2006,7 +2111,7 @@ function drawManeuverNodes(pred) {
     const selected = pn.id === selectedNodeId;
 
     // direction de poussée, au point où la poussée commence
-    if (pn.burnStartT !== undefined && pn.power > 0 && pn.duration > 0) {
+    if (pn.kind !== "land" && pn.burnStartT !== undefined && pn.power > 0 && pn.duration > 0) {
       const b = displayPosition(pred, pn.burnStartPatch, pn.burnStartX, pn.burnStartY);
       if (b) {
         const len = 36 / zoom;
@@ -2038,7 +2143,8 @@ function drawManeuverNodes(pred) {
     textSize(11 / zoom);
     textAlign(LEFT, BOTTOM);
     const when = pn.startT < gameTime ? "en cours" : formatT(pn.startT);
-    text(`M${pred.firstNode + i + 1} · ${when}`, p.x + 9 / zoom, p.y - 6 / zoom);
+    const label = pn.kind === "land" ? " · atterrissage" : "";
+    text(`M${pred.firstNode + i + 1} · ${when}${label}`, p.x + 9 / zoom, p.y - 6 / zoom);
   });
   pop();
 }
@@ -2119,6 +2225,7 @@ function autopilotStatus() {
   const node = autopilot.nodes[autopilot.index];
   const label = `Plan : manœuvre ${autopilot.index + 1}/${autopilot.nodes.length}`;
   if (!node) return label;
+  if (autopilot.phase === "landing") return `${label} — atterrissage guidé`;
   if (autopilot.phase === "rotating") return `${label} — rotation vers le cap`;
   if (autopilot.phase === "burning") return `${label} — poussée (reste ${Math.max(0, autopilot.burnEnd - gameTime).toFixed(1)} s)`;
   return `${label} — dans ${formatT(node.t).replace("T+", "")}`;
@@ -2174,7 +2281,7 @@ function drawHUD(referenceBody, prediction) {
       ? [
           "Clic sur le tracé : ajouter une manœuvre · clic sur un point : la sélectionner · glisser un point : le déplacer",
           "Glisser le fond : déplacer la vue · molette : zoom · [Suppr] effacer la manœuvre · [Échap] désélectionner",
-          "« Destination » : choisir un astre et une altitude, la route est calculée automatiquement",
+          "« Destination » : choisir un astre et une altitude, la route est calculée automatiquement · « Atterrir » : se poser à la fin du plan",
           "[P] ou « Lancer le plan » : reprendre le jeu, le pilote automatique exécute le plan",
           "Tracé : vert = sans poussée · jaune = rotation · orange = poussée — chaque portion est dessinée autour de son astre",
         ]
@@ -2223,15 +2330,16 @@ function drawPlanSummary(x, y, prediction) {
     text("Aucune manœuvre — cliquez sur le tracé ou choisissez une destination", x, y);
     return;
   }
-  const total = planNodes.reduce((sum, n) => sum + nodeDeltaV(n), 0);
+  const total = planNodes.reduce((sum, n) => sum + nodeDeltaV(n, prediction && prediction.nodes.find((p) => p.id === n.id)), 0);
   text(`Plan de vol : ${planNodes.length} manœuvres · Δv total ${total.toFixed(0)}`, x, y);
   const maxLines = Math.max(3, Math.floor((height - y - 160) / 18));
   planNodes.slice(0, maxLines).forEach((node, i) => {
     const predicted = prediction && prediction.nodes.find((n) => n.id === node.id);
     const start = predicted && predicted.startT !== undefined ? `${formatT(predicted.startT)} (${predicted.startRef.name})` : "non atteinte";
     const burn = node.power > 0 && node.duration > 0 ? `Δv ${nodeDeltaV(node).toFixed(1)}` : "rotation seule";
+    const what = node.kind === "land" ? `atterrissage guidé · Δv ${nodeDeltaV(node, predicted).toFixed(1)}` : `cap ${Math.round(node.heading)}° · ${burn}`;
     fill(node.id === selectedNodeId ? [255, 230, 120] : [255, 255, 255, 200]);
-    text(`M${i + 1} · ${start} · cap ${Math.round(node.heading)}° · ${burn}`, x, y + 18 + i * 18);
+    text(`M${i + 1} · ${start} · ${what}`, x, y + 18 + i * 18);
   });
   if (planNodes.length > maxLines) {
     fill(255, 160);
