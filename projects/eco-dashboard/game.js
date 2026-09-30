@@ -274,6 +274,18 @@
     { id: "cloak", name: "Camouflage galactique", need: ["COM-7", "OBS-8"] },
   ];
 
+  // voie alternative, probabiliste, pour les jalons les plus tôt bloqués
+  // derrière une longue chaîne de prérequis déterministe : on compose un
+  // vaisseau avec ses connaissances (entraînement ENT) et son matériel
+  // (métaux + argent au-delà du coût plancher), et on tente le lancement.
+  // Un échec consomme quand même les ressources engagées.
+  const MISSIONS = [
+    { id: "orbit", name: "Mise en orbite", minTech: "PRO-1", baseChance: 0.25, moneyCost: 120, materialCost: 40 },
+    { id: "satellite", name: "Lancement d'un satellite", minTech: "PRO-1", baseChance: 0.3, moneyCost: 100, materialCost: 30 },
+    { id: "human", name: "Vol habité", minTech: "PRO-1", baseChance: 0.15, moneyCost: 200, materialCost: 60 },
+    { id: "samples", name: "Retour d'échantillons d'un autre astre", minTech: "PRO-1", baseChance: 0.2, moneyCost: 150, materialCost: 50 },
+  ];
+
   // trois âges : early (atteindre l'espace, la pollution menace), mid
   // (planètes proches, la forêt sombre guette), late (fusion, planètes
   // extérieures, armadas)
@@ -655,20 +667,67 @@
     }
   }
 
+  function achieveMilestone(s, p, m) {
+    if (p.milestones.includes(m.id)) return;
+    p.milestones.push(m.id);
+    log(s, "jalon", `${p.name} atteint un jalon : ${m.name}`, [p.id]);
+    if (m.id === CONFIG.darkForestTrigger && s.darkForestTriggerTurn == null) {
+      s.darkForestTriggerTurn = s.turn;
+      log(s, "forêt sombre", `${p.name} rend l'humanité visible (${m.name}) — la forêt sombre commence à guetter`, [p.id]);
+    }
+    if (m.id === "cloak" && !s.darkForestCloaked) {
+      s.darkForestCloaked = true;
+      log(s, "forêt sombre", `${p.name} parvient à camoufler l'humanité — plus de projectile ni de flotte`, [p.id]);
+    }
+  }
+
   function checkMilestones(s, p) {
     for (const m of MILESTONES) {
       if (p.milestones.includes(m.id) || !m.need.every((t) => hasTech(p, t))) continue;
-      p.milestones.push(m.id);
-      log(s, "jalon", `${p.name} atteint un jalon : ${m.name}`, [p.id]);
-      if (m.id === CONFIG.darkForestTrigger && s.darkForestTriggerTurn == null) {
-        s.darkForestTriggerTurn = s.turn;
-        log(s, "forêt sombre", `${p.name} rend l'humanité visible (${m.name}) — la forêt sombre commence à guetter`, [p.id]);
-      }
-      if (m.id === "cloak" && !s.darkForestCloaked) {
-        s.darkForestCloaked = true;
-        log(s, "forêt sombre", `${p.name} parvient à camoufler l'humanité — plus de projectile ni de flotte`, [p.id]);
-      }
+      achieveMilestone(s, p, m);
     }
+  }
+
+  // entraînement de l'équipage : niveau des technos de la branche ENT
+  // possédées, plafonné (pas besoin de la branche complète pour un bonus max)
+  function crewTraining(p) {
+    const level = p.techs.filter((t) => t.startsWith("ENT-")).length;
+    return Math.min(1, level / 3);
+  }
+
+  // chance de réussite d'une tentative de lancement : socle de la mission,
+  // + jusqu'à +25 pts pour l'entraînement, + jusqu'à +25 pts pour le
+  // matériel engagé au-delà du coût plancher (rendements décroissants après
+  // le double du coût), plafonnée pour garder un risque réel.
+  function missionChance(p, m, money, material) {
+    const equip = Math.min(1, (Math.max(0, money - m.moneyCost) / m.moneyCost + Math.max(0, material - m.materialCost) / m.materialCost) / 2);
+    return Math.min(0.85, m.baseChance + crewTraining(p) * 0.25 + equip * 0.25);
+  }
+
+  function launchMission(s, pid, missionId, money, material) {
+    const p = player(s, pid);
+    const g = guard(s, p);
+    if (g) return g;
+    const m = MISSIONS.find((x) => x.id === missionId);
+    if (!m) return fail("Mission inconnue");
+    if (p.milestones.includes(missionId)) return fail("Jalon déjà atteint");
+    if (m.minTech && !hasTech(p, m.minTech)) return fail(`Nécessite ${TECHS[m.minTech].name}`);
+    money = Math.max(m.moneyCost, Math.floor(+money || 0));
+    material = Math.max(m.materialCost, Math.floor(+material || 0));
+    if (p.money < money) return fail(`Il faut ${money} ₵`);
+    if (p.material < material) return fail(`Il faut ${material} ${MATERIAL.toLowerCase()}`);
+    const chance = missionChance(p, m, money, material);
+    p.money -= money;
+    p.material -= material;
+    const success = rand(s) < chance;
+    const pct = Math.round(chance * 100);
+    if (success) {
+      log(s, "mission", `${p.name} lance "${m.name}" (${pct}% de chances, ${money} ₵ + ${material} ${MATERIAL.toLowerCase()}) — réussite !`, [pid]);
+      achieveMilestone(s, p, MILESTONES.find((x) => x.id === missionId));
+    } else {
+      log(s, "mission", `${p.name} lance "${m.name}" (${pct}% de chances, ${money} ₵ + ${material} ${MATERIAL.toLowerCase()}) — échec, tout est perdu`, [pid]);
+    }
+    return { ok: true, success, chance: pct, msg: success ? "Lancement réussi" : "Échec du lancement" };
   }
 
   // -------------------------------------------------------- construction
@@ -1658,7 +1717,8 @@
   }
 
   const api = {
-    RARES, MATERIAL, ZONES, CONFIG, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, AGES, PROJECTS,
+    RARES, MATERIAL, ZONES, CONFIG, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, MISSIONS, AGES, PROJECTS,
+    launchMission, missionChance, crewTraining,
     newGame, endTurn, setBots,
     hire, fire, assignResearch, staffOn, effectiveResearchers, researchChance, toolingCost, equipmentCost, canResearch, xpLevel, labCapacity, pooledKnowledge,
     build, dismantle, buildCost, fuelStationFor, setPrice, buyRare, setMaterialPrice, buyMaterial, setFuelFee, materialPrice,

@@ -2,7 +2,7 @@
 // Hot-seat : on choisit "en tant que" qui l'on agit ; les joueurs non
 // humains sont joués par une stratégie automatique à la fin du tour.
 
-const { RARES, MATERIAL, ZONES, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, AGES, PROJECTS, CONFIG } = Game;
+const { RARES, MATERIAL, ZONES, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, MISSIONS, AGES, PROJECTS, CONFIG } = Game;
 const { STRATEGIES } = Strategies;
 
 let S = null;
@@ -225,6 +225,29 @@ function renderActions() {
     .join(", ");
   $("[data-hint=research-active]").textContent = assignedList ? `En cours : ${assignedList}` : "";
 
+  // vaisseau — lancement probabiliste : alternative rapide aux jalons qui
+  // demandent normalement toute une chaîne de technos, au prix du risque
+  // (échec = ressources perdues)
+  const fmi = $("#f-mission");
+  const missionsAvailable = MISSIONS.filter((m) => !me.milestones.includes(m.id));
+  fillSelect(fmi.mission, missionsAvailable.map((m) => [m.id, `${m.name} — ${m.moneyCost} ₵ + ${m.materialCost} mét. mini`]));
+  const selMission = MISSIONS.find((m) => m.id === fmi.mission.value);
+  if (!selMission) {
+    $("[data-hint=mission]").textContent = missionsAvailable.length ? "" : "Tous les jalons éligibles sont déjà atteints";
+  } else {
+    const locked = selMission.minTech && !Game.hasTech(me, selMission.minTech);
+    const money = Math.max(selMission.moneyCost, +fmi.money.value || selMission.moneyCost);
+    const material = Math.max(selMission.materialCost, +fmi.material.value || selMission.materialCost);
+    const chance = Game.missionChance(me, selMission, money, material);
+    $("[data-hint=mission]").textContent = [
+      locked ? `⚠ nécessite ${TECHS[selMission.minTech].name}` : "",
+      `entraînement équipage ${Math.round(Game.crewTraining(me) * 100)} %`,
+      `chance de réussite : ${Math.round(chance * 100)} % (${money} ₵ + ${material} ${MATERIAL.toLowerCase()} engagés, tout perdu en cas d'échec)`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
   // construction — la zone conditionne l'accès (verrou technologique) et le
   // coût (plus loin = plus cher), donc on la remplit avant le type d'infra
   const fb = $("#f-build");
@@ -381,6 +404,15 @@ function bindActions() {
   fr.tech.onchange = renderActions;
   $("[data-act=hire]", fr).onclick = () => run(() => Game.hire(S, actor, fr.hireQty.value));
   $("[data-act=fire]", fr).onclick = () => run(() => Game.fire(S, actor, fr.hireQty.value));
+
+  const fmi = $("#f-mission");
+  fmi.onsubmit = (e) => {
+    e.preventDefault();
+    run(() => Game.launchMission(S, actor, fmi.mission.value, fmi.money.value, fmi.material.value));
+  };
+  fmi.mission.onchange = renderActions;
+  fmi.money.oninput = renderActions;
+  fmi.material.oninput = renderActions;
 
   const fb = $("#f-build");
   fb.onsubmit = (e) => {
