@@ -9,24 +9,35 @@
     he3: "Hélium-3",
     cristal: "Cristaux",
     glace: "Glace cométaire",
+    ergols: "Ergols", // raffinés depuis la glace (Raffinerie) — carburant de propulsion
   };
 
   // pas de position réelle : une zone n'est qu'un "lieu" où les
-  // infrastructures de joueurs différents peuvent se gêner.
+  // infrastructures de joueurs différents peuvent se gêner. La Terre est le
+  // foyer commun de tous les joueurs (`safe`) : pas de conflit d'empiètement
+  // là-bas — les autres zones ("planètes") sont ouvertes à tous, sans
+  // exclusivité. `tier` = éloignement (0 = Terre) : renchérit la construction
+  // (cf. buildCost) ; `reachTech` = technologie minimale pour y construire
+  // quoi que ce soit — au-delà, l'accès à la ressource rare elle-même
+  // demande en plus la technologie de l'infrastructure concernée (ex :
+  // l'Extracteur exige EXT-6, cf. INFRA).
   const ZONES = [
-    { id: "lune", name: "Lune", rare: "lune" },
-    { id: "geante", name: "Géante gazeuse", rare: "he3" },
-    { id: "ceinture", name: "Ceinture", rare: "cristal" },
-    { id: "comete", name: "Comète", rare: "glace" },
-    { id: "orbite", name: "Orbite basse", rare: null },
+    { id: "terre", name: "Terre", rare: null, safe: true, tier: 0, reachTech: null },
+    { id: "orbite", name: "Orbite basse", rare: null, tier: 1, reachTech: "CON-1" },
+    { id: "lune", name: "Lune", rare: "lune", tier: 2, reachTech: "EXT-3" },
+    { id: "ceinture", name: "Ceinture", rare: "cristal", tier: 3, reachTech: "EXT-5" },
+    { id: "geante", name: "Géante gazeuse", rare: "he3", tier: 4, reachTech: "EXT-7" },
+    { id: "comete", name: "Comète", rare: "glace", tier: 5, reachTech: "EXT-8" },
   ];
+  // multiplicateur de coût (argent/matière) selon l'éloignement de la zone
+  const ZONE_COST_MULT = (zoneId) => 1 + zone(zoneId).tier * 0.4;
 
   const CONFIG = {
-    maxTurns: 20,
+    maxTurns: 400, // 100 ans à 4 tours (saisons) par an — laisse une chance d'atteindre les technos profondes (EXT-6 tombe en moyenne bien plus tard, mais quelques parties chanceuses y arrivent)
     startMoney: 40,
     startMaterial: 30,
     startRare: 3,
-    bankerStartMoney: 80, // joueur sans ressource rare (Orbite basse) : le financeur
+    bankerStartMoney: 80, // tous les joueurs partent de la Terre (pas de rare) : ce montant s'applique désormais à tout le monde
     maintenance: 2, // argent / infrastructure / tour (hors base)
     shares: 100,
     dividendRate: 0.2, // part de l'argent produit reversée aux actionnaires
@@ -34,12 +45,17 @@
     incidentAggressive: 0.2, // risque par tour d'abîmer un voisin, placement agressif
     planetHealth: 100,
     pollutionRegen: 12,
-    darkForestStart: 8, // tour où la forêt sombre commence à frapper
-    darkForestStep: 0.05, // +5 % de risque de frappe par tour ensuite
+    darkForestTrigger: "orbit", // jalon (cf. MILESTONES) qui rend l'humanité visible et déclenche la forêt sombre
+    darkForestStep: 0.0025, // +0,25 % de risque de frappe par tour depuis le déclenchement
     darkForestMax: 0.6,
     bankruptTurns: 2, // tours consécutifs en négatif avant la faillite
-    researchCostScale: 0.5, // chaque techno possédée renchérit les suivantes de +50 %
+    researchMaxChance: 0.95, // plafond de chance de découverte par tour, tous chercheurs confondus
+    researchContinuationRate: 0.3, // coût des tours suivants (une fois la recherche lancée), en fraction du coût initial
+    seniorityBonusTurns: 5, // un bloc d'ancienneté toutes les N tours sur la même techno
+    seniorityBonusPerBlock: 0.03, // +3 % de chance par bloc d'ancienneté
+    seniorityBonusMax: 0.1, // plafond du bonus d'ancienneté (pas de gain infini)
     defaultRarePrice: 5,
+    defaultMaterialPrice: 2, // vendre sa matière première pour financer le développement des autres
     buyoutMajority: 51,
     offerTTL: 2, // tours avant qu'une offre non traitée expire
   };
@@ -48,23 +64,148 @@
     base: { name: "Base", cost: {}, hp: 3, prod: { money: 10, material: 8, homeRare: 1 }, pollution: 0.5, visibility: 2, buildable: false },
     mine: { name: "Mine", cost: { money: 10, material: 10 }, hp: 2, prod: { material: 6 }, pollution: 1.5, visibility: 1 },
     comptoir: { name: "Comptoir", cost: { money: 15, material: 15, rares: { he3: 1 } }, hp: 2, prod: { money: 8 }, pollution: 0.5, visibility: 2 },
-    labo: { name: "Laboratoire", cost: { money: 20, material: 10, rares: { cristal: 1 } }, hp: 2, prod: { research: 4 }, pollution: 0.5, visibility: 1 },
-    extracteur: { name: "Extracteur", cost: { money: 15, material: 20, rares: { lune: 1 } }, hp: 2, prod: { zoneRare: 2 }, pollution: 3, visibility: 2, tech: "forage" },
-    reacteur: { name: "Réacteur à fusion", cost: { money: 25, material: 25, rares: { glace: 1 } }, hp: 2, prod: { money: 14, material: 4 }, upkeep: { he3: 1 }, pollution: 0, visibility: 3, tech: "fusion" },
+    labo: { name: "Laboratoire", cost: { money: 20, material: 15 }, hp: 2, prod: { money: 6 }, pollution: 0.5, visibility: 1 },
+    extracteur: { name: "Extracteur", cost: { money: 15, material: 20 }, hp: 2, prod: { zoneRare: 2 }, pollution: 3, visibility: 2, tech: "EXT-6" },
+    reacteur: { name: "Réacteur à fusion", cost: { money: 25, material: 25, rares: { glace: 1 } }, hp: 2, prod: { money: 14, material: 4 }, upkeep: { he3: 1 }, pollution: 0, visibility: 3, tech: "PRO-8" },
+    raffinerie: { name: "Raffinerie", cost: { money: 15, material: 15 }, hp: 2, prod: { ergols: 3 }, upkeep: { glace: 2 }, pollution: 1, visibility: 1 },
+  };
+
+  // Arbre technologique — programme spatial. `cost` = crédits dépensés par
+  // chercheur affecté, tant que la recherche est en cours ; la première
+  // affectation coûte plein tarif (mise en place), les tours suivants sur la
+  // même techno coûtent CONFIG.researchContinuationRate × cost (maintenance,
+  // moins cher). `chance` = probabilité de découverte par chercheur et par
+  // tour ; avec N chercheurs, chance du tour = 1 - (1 - chance)^N, plafonnée
+  // à 95 %. Un tour infructueux est perdu (aucun remboursement).
+  // Coûts redimensionnés (÷10) par rapport à la table de référence pour
+  // rester dans l'échelle économique du jeu (départ à 80 ₵).
+  const TECH_CATEGORIES = {
+    pro: "Propulsion",
+    str: "Structure et carburant",
+    gui: "Guidage et contrôle",
+    com: "Communications radio",
+    sup: "Support de vie",
+    ent: "Entraînement",
+    rec: "Recherche scientifique",
+    ext: "Extraction de ressources",
+    con: "Construction spatiale",
+    obs: "Observation et détection",
   };
 
   const TECHS = {
-    logistique: { name: "Logistique", rp: 15, rare: {}, desc: "-25 % sur le coût de construction" },
-    forage: { name: "Forage profond", rp: 20, rare: { cristal: 2 }, desc: "Débloque l'extracteur (ressource rare de la zone)" },
-    blindage: { name: "Blindage", rp: 20, rare: { lune: 2 }, desc: "Divise par 2 le risque de dégâts par empiètement" },
-    recyclage: { name: "Recyclage", rp: 20, rare: { glace: 2 }, desc: "Divise par 2 la pollution de vos infrastructures" },
-    furtivite: { name: "Furtivité", rp: 25, rare: { glace: 1, lune: 1 }, desc: "Divise par 2 votre visibilité (forêt sombre)" },
-    fusion: { name: "Fusion", rp: 30, rare: { he3: 3 }, desc: "Débloque le réacteur à fusion (consomme 1 He-3 / tour)" },
-    armement: { name: "Armement", rp: 30, rare: { lune: 1, cristal: 2 }, desc: "Double le risque causé par vos placements agressifs" },
+    // Propulsion
+    "PRO-1": { name: "Fusée à poudre", category: "pro", prereqs: [], cost: 10, chance: 0.2 },
+    "PRO-2": { name: "Moteur à ergols liquides", category: "pro", prereqs: ["PRO-1"], cost: 30, chance: 0.12 },
+    "PRO-3": { name: "Moteur cryogénique", category: "pro", prereqs: ["PRO-2", "STR-3"], cost: 80, chance: 0.08 },
+    "PRO-4": { name: "Moteur ionique", category: "pro", prereqs: ["PRO-3", "REC-3"], cost: 200, chance: 0.05 },
+    "PRO-5": { name: "Propulsion nucléaire thermique", category: "pro", prereqs: ["PRO-3", "REC-4"], cost: 400, chance: 0.04, rare: {ergols: 2} },
+    "PRO-6": { name: "Moteur à plasma", category: "pro", prereqs: ["PRO-4"], cost: 600, chance: 0.03 },
+    "PRO-7": { name: "Moteur à fission avancée", category: "pro", prereqs: ["PRO-5", "STR-7"], cost: 1000, chance: 0.02 },
+    "PRO-8": { name: "Moteur à fusion", category: "pro", prereqs: ["PRO-6", "PRO-7", "REC-7"], cost: 2500, chance: 0.015, rare: {ergols: 3,he3: 2} },
+    "PRO-9": { name: "Moteur à antimatière", category: "pro", prereqs: ["PRO-8", "REC-8"], cost: 6000, chance: 0.01 },
+    "PRO-10": { name: "Moteur à distorsion", category: "pro", prereqs: ["PRO-9", "OBS-8", "REC-9"], cost: 15000, chance: 0.005, rare: {ergols: 6} },
+    // Structure et carburant
+    "STR-1": { name: "Corps de fusée en tôle", category: "str", prereqs: [], cost: 10, chance: 0.2 },
+    "STR-2": { name: "Réservoirs pressurisés en aluminium", category: "str", prereqs: ["STR-1"], cost: 25, chance: 0.14 },
+    "STR-3": { name: "Étagement", category: "str", prereqs: ["STR-2", "PRO-2"], cost: 60, chance: 0.09 },
+    "STR-4": { name: "Matériaux composites", category: "str", prereqs: ["STR-2", "REC-2"], cost: 120, chance: 0.07, rare: { lune: 1 } },
+    "STR-5": { name: "Réservoirs cryogéniques isolés", category: "str", prereqs: ["STR-4"], cost: 200, chance: 0.05 },
+    "STR-6": { name: "Blindage anti-radiations", category: "str", prereqs: ["STR-4"], cost: 300, chance: 0.04 },
+    "STR-7": { name: "Alliages haute résistance", category: "str", prereqs: ["STR-4", "REC-2"], cost: 500, chance: 0.03, rare: {lune: 2} },
+    "STR-8": { name: "Nanomatériaux", category: "str", prereqs: ["STR-7", "REC-5"], cost: 2000, chance: 0.015, rare: {lune: 4} },
+    // Guidage et contrôle
+    "GUI-1": { name: "Trajectoire préprogrammée", category: "gui", prereqs: [], cost: 10, chance: 0.2 },
+    "GUI-2": { name: "Gyroscopes et stabilisation", category: "gui", prereqs: ["GUI-1"], cost: 30, chance: 0.12 },
+    "GUI-3": { name: "Mémoire étendue", category: "gui", prereqs: ["GUI-1"], cost: 50, chance: 0.1 },
+    "GUI-4": { name: "Ordinateur de bord", category: "gui", prereqs: ["GUI-3", "REC-1"], cost: 120, chance: 0.07 },
+    "GUI-5": { name: "Guidage inertiel de précision", category: "gui", prereqs: ["GUI-2", "GUI-4"], cost: 250, chance: 0.05, rare: {cristal: 1} },
+    "GUI-6": { name: "Télécommande", category: "gui", prereqs: ["GUI-4", "COM-2"], cost: 350, chance: 0.04 },
+    "GUI-7": { name: "Pilotage à distance en temps réel", category: "gui", prereqs: ["GUI-6", "COM-3"], cost: 600, chance: 0.03 },
+    "GUI-8": { name: "Pilote automatique intelligent", category: "gui", prereqs: ["GUI-5", "REC-5"], cost: 1200, chance: 0.02, rare: {cristal: 2} },
+    "GUI-9": { name: "Navigation interplanétaire autonome", category: "gui", prereqs: ["GUI-7", "GUI-8", "COM-5"], cost: 2500, chance: 0.015, rare: {cristal: 3} },
+    // Communications radio
+    "COM-1": { name: "Radio basique", category: "com", prereqs: [], cost: 15, chance: 0.18 },
+    "COM-2": { name: "Émetteur longue portée", category: "com", prereqs: ["COM-1"], cost: 50, chance: 0.1 },
+    "COM-3": { name: "Réseau de stations au sol", category: "com", prereqs: ["COM-2"], cost: 150, chance: 0.07, rare: {cristal: 1} },
+    "COM-4": { name: "Satellites relais", category: "com", prereqs: ["COM-3", "CON-4"], cost: 300, chance: 0.05 },
+    "COM-5": { name: "Réseau d'espace lointain", category: "com", prereqs: ["COM-4", "REC-3"], cost: 800, chance: 0.03 },
+    "COM-6": { name: "Communication laser", category: "com", prereqs: ["COM-5", "REC-5"], cost: 1500, chance: 0.02, rare: {cristal: 2} },
+    "COM-7": { name: "Communication quantique", category: "com", prereqs: ["COM-6", "REC-8"], cost: 5000, chance: 0.008, rare: {cristal: 4} },
+    // Support de vie
+    "SUP-1": { name: "Capsule pressurisée", category: "sup", prereqs: ["STR-2"], cost: 40, chance: 0.12 },
+    "SUP-2": { name: "Réserves d'oxygène", category: "sup", prereqs: ["SUP-1"], cost: 60, chance: 0.1 },
+    "SUP-3": { name: "Recyclage du CO2", category: "sup", prereqs: ["SUP-2", "REC-2"], cost: 150, chance: 0.07 },
+    "SUP-4": { name: "Recyclage de l'eau et de la nourriture", category: "sup", prereqs: ["SUP-3"], cost: 300, chance: 0.05 },
+    "SUP-5": { name: "Protection contre les radiations", category: "sup", prereqs: ["SUP-4", "STR-6"], cost: 500, chance: 0.04 },
+    "SUP-6": { name: "Gravité artificielle", category: "sup", prereqs: ["SUP-4", "CON-6"], cost: 900, chance: 0.03, rare: {glace: 2} },
+    "SUP-7": { name: "Biosphère fermée", category: "sup", prereqs: ["SUP-5", "SUP-6"], cost: 2000, chance: 0.015 },
+    "SUP-8": { name: "Hibernation des équipages", category: "sup", prereqs: ["SUP-7", "REC-8"], cost: 4000, chance: 0.01, rare: {glace: 4} },
+    // Entraînement
+    "ENT-1": { name: "Centre d'entraînement de base", category: "ent", prereqs: [], cost: 30, chance: 0.15 },
+    "ENT-2": { name: "Centrifugeuse", category: "ent", prereqs: ["ENT-1"], cost: 80, chance: 0.09 },
+    "ENT-3": { name: "Simulateurs de vol", category: "ent", prereqs: ["ENT-1", "GUI-4"], cost: 150, chance: 0.07 },
+    "ENT-4": { name: "Bassin d'apesanteur simulée", category: "ent", prereqs: ["ENT-2", "SUP-1"], cost: 250, chance: 0.05 },
+    "ENT-5": { name: "Entraînement aux longues missions", category: "ent", prereqs: ["ENT-3", "SUP-4"], cost: 500, chance: 0.04, rare: {glace: 1} },
+    "ENT-6": { name: "Sélection d'élite", category: "ent", prereqs: ["ENT-5"], cost: 800, chance: 0.03 },
+    "ENT-7": { name: "Simulation en réalité virtuelle", category: "ent", prereqs: ["ENT-6", "REC-5"], cost: 1500, chance: 0.02 },
+    // Recherche scientifique
+    "REC-1": { name: "Laboratoire de base", category: "rec", prereqs: [], cost: 20, chance: 0.18 },
+    "REC-2": { name: "Laboratoire des matériaux", category: "rec", prereqs: ["REC-1"], cost: 60, chance: 0.1 },
+    "REC-3": { name: "Laboratoire d'énergie", category: "rec", prereqs: ["REC-1"], cost: 80, chance: 0.09 },
+    "REC-4": { name: "Centre de physique nucléaire", category: "rec", prereqs: ["REC-3"], cost: 250, chance: 0.05 },
+    "REC-5": { name: "Supercalculateur", category: "rec", prereqs: ["REC-2", "REC-3"], cost: 400, chance: 0.04 },
+    "REC-6": { name: "Laboratoire orbital", category: "rec", prereqs: ["REC-5", "CON-6"], cost: 800, chance: 0.03, rare: {cristal: 2} },
+    "REC-7": { name: "Institut de physique des plasmas", category: "rec", prereqs: ["REC-4", "REC-5"], cost: 1200, chance: 0.02 },
+    "REC-8": { name: "Institut d'antimatière et de physique quantique", category: "rec", prereqs: ["REC-7", "REC-6"], cost: 3500, chance: 0.01, rare: {cristal: 4} },
+    "REC-9": { name: "Institut de physique fondamentale", category: "rec", prereqs: ["REC-8"], cost: 8000, chance: 0.007 },
+    // Extraction de ressources
+    "EXT-1": { name: "Capsule de retour d'échantillons", category: "ext", prereqs: ["STR-2", "GUI-2"], cost: 80, chance: 0.09 },
+    "EXT-2": { name: "Bouclier thermique de rentrée", category: "ext", prereqs: ["EXT-1", "REC-2"], cost: 150, chance: 0.07 },
+    "EXT-3": { name: "Sonde d'atterrissage", category: "ext", prereqs: ["EXT-2", "GUI-6"], cost: 300, chance: 0.05 },
+    "EXT-4": { name: "Foreuse robotique", category: "ext", prereqs: ["EXT-3"], cost: 450, chance: 0.04 },
+    "EXT-5": { name: "Cargo de retour de ressources", category: "ext", prereqs: ["EXT-4", "PRO-3"], cost: 700, chance: 0.03 },
+    "EXT-6": { name: "Exploitation minière lunaire", category: "ext", prereqs: ["EXT-5"], cost: 1000, chance: 0.025, desc: "Débloque l'extracteur (ressource rare de la zone)" },
+    "EXT-7": { name: "Exploitation d'astéroïdes", category: "ext", prereqs: ["EXT-6", "GUI-9"], cost: 2000, chance: 0.015 },
+    "EXT-8": { name: "Raffinage sur place", category: "ext", prereqs: ["EXT-7", "CON-9"], cost: 3500, chance: 0.01 },
+    "EXT-9": { name: "Catapulte électromagnétique planétaire", category: "ext", prereqs: ["EXT-8", "PRO-8"], cost: 7000, chance: 0.007 },
+    // Construction spatiale et satellites
+    "CON-1": { name: "Satellite basique", category: "con", prereqs: ["PRO-3", "GUI-4"], cost: 150, chance: 0.07 },
+    "CON-2": { name: "Panneaux solaires", category: "con", prereqs: ["CON-1", "REC-3"], cost: 200, chance: 0.06 },
+    "CON-3": { name: "Satellite de communication", category: "con", prereqs: ["CON-2", "COM-3"], cost: 300, chance: 0.05 },
+    "CON-4": { name: "Satellite relais", category: "con", prereqs: ["CON-3"], cost: 400, chance: 0.04 },
+    "CON-5": { name: "Amarrage en orbite", category: "con", prereqs: ["CON-2", "GUI-5"], cost: 500, chance: 0.04 },
+    "CON-6": { name: "Station spatiale", category: "con", prereqs: ["CON-5", "SUP-4"], cost: 900, chance: 0.03, rare: {lune: 1} },
+    "CON-7": { name: "Bras robotique orbital", category: "con", prereqs: ["CON-6", "GUI-8"], cost: 1200, chance: 0.02 },
+    "CON-8": { name: "Constellations de satellites", category: "con", prereqs: ["CON-4", "CON-7"], cost: 1500, chance: 0.02 },
+    "CON-9": { name: "Impression 3D en orbite", category: "con", prereqs: ["CON-7", "STR-7"], cost: 2000, chance: 0.015, rare: {lune: 2} },
+    "CON-10": { name: "Chantier orbital et usine spatiale", category: "con", prereqs: ["CON-9", "EXT-6"], cost: 4000, chance: 0.01 },
+    "CON-11": { name: "Ascenseur spatial", category: "con", prereqs: ["CON-10", "STR-8"], cost: 10000, chance: 0.005, rare: {lune: 4} },
+    // Observation et détection
+    "OBS-1": { name: "Télescope au sol", category: "obs", prereqs: [], cost: 20, chance: 0.15 },
+    "OBS-2": { name: "Analyse de sol depuis le sol", category: "obs", prereqs: ["OBS-1", "REC-2"], cost: 80, chance: 0.09 },
+    "OBS-3": { name: "Alerte et suivi des astéroïdes", category: "obs", prereqs: ["OBS-1", "COM-3"], cost: 200, chance: 0.06 },
+    "OBS-4": { name: "Satellite d'observation", category: "obs", prereqs: ["CON-1", "OBS-1"], cost: 300, chance: 0.05, rare: {cristal: 1} },
+    "OBS-5": { name: "Télescope orbital", category: "obs", prereqs: ["OBS-4", "REC-5"], cost: 800, chance: 0.03 },
+    "OBS-6": { name: "Analyse des sols depuis l'orbite", category: "obs", prereqs: ["OBS-4", "OBS-2"], cost: 600, chance: 0.04 },
+    "OBS-7": { name: "Détection d'exoplanètes", category: "obs", prereqs: ["OBS-5"], cost: 1500, chance: 0.02 },
+    "OBS-8": { name: "Réseau de télescopes géants", category: "obs", prereqs: ["OBS-7", "CON-8"], cost: 4000, chance: 0.01, rare: {cristal: 2} },
   };
 
+  // jalons narratifs : informatifs (journalisés une fois atteints), pas des
+  // conditions de victoire — celles-ci restent celles de checkEnd()
+  const MILESTONES = [
+    { id: "liftoff", name: "Première fusée qui décolle", need: ["PRO-1"] },
+    { id: "altitude", name: "Record d'altitude", need: ["PRO-2", "STR-2", "GUI-2"] },
+    { id: "orbit", name: "Première orbite", need: ["PRO-3", "STR-3", "GUI-4"] },
+    { id: "satellite", name: "Premier satellite", need: ["PRO-3", "STR-3", "GUI-4", "CON-4"] },
+    { id: "human", name: "Premier humain en orbite", need: ["PRO-3", "STR-3", "GUI-4", "SUP-1", "SUP-2", "ENT-1"] },
+    { id: "samples", name: "Retour d'échantillons d'un autre astre", need: ["EXT-1", "EXT-2", "COM-5"] },
+    { id: "station", name: "Première station spatiale", need: ["CON-6", "SUP-4"] },
+    { id: "elevator", name: "Ascenseur spatial", need: ["CON-11"] },
+    { id: "cloak", name: "Camouflage galactique", need: ["COM-7", "OBS-8"] },
+  ];
+
   const NAMES = ["Aurora", "Borealis", "Cygnus", "Draco", "Eridan"];
-  const HOMES = ["lune", "geante", "ceinture", "comete", "orbite"];
   const ACTIVE = ["actif", "faillite"];
 
   // ---------------------------------------------------------------- utils
@@ -165,6 +306,13 @@
     return prices.reduce((a, b) => a + b, 0) / prices.length;
   }
 
+  // même logique que marketPrice, mais pour la matière première (pas une rare)
+  function materialPrice(s) {
+    const prices = s.players.filter((p) => isActive(p) && p.material > 0).map((p) => p.materialPrice);
+    if (!prices.length) return CONFIG.defaultMaterialPrice;
+    return prices.reduce((a, b) => a + b, 0) / prices.length;
+  }
+
   function infraValue(i) {
     const d = INFRA[i.type];
     const v = i.type === "base" ? 60 : (d.cost.money || 0) + (d.cost.material || 0) * 0.5;
@@ -193,7 +341,7 @@
   // valeur nette de l'entreprise, hors parts détenues chez les autres
   function equity(s, p) {
     if (!isActive(p)) return 0;
-    let v = p.money + p.material * 0.5 + p.techs.length * 10 + p.research * 0.5;
+    let v = p.money + p.material * 0.5 + p.techs.length * 10;
     for (const r in p.rares) v += p.rares[r] * marketPrice(s, r);
     for (const i of p.infras) v += infraValue(i);
     return v + receivableOf(s, p) * 0.8 - debtOf(s, p);
@@ -205,34 +353,65 @@
   }
 
   function visibility(p) {
-    const v = p.infras.reduce((a, i) => a + INFRA[i.type].visibility, 0);
-    return hasTech(p, "furtivite") ? v / 2 : v;
+    return p.infras.reduce((a, i) => a + INFRA[i.type].visibility, 0);
   }
 
-  function techCost(p, t) {
-    return Math.round(TECHS[t].rp * (1 + CONFIG.researchCostScale * p.techs.length));
+  // coût (en crédits) par chercheur affecté à `t` ce tour-ci : plein tarif
+  // au premier tour de cette recherche, tarif réduit ensuite (maintenance)
+  function researchCostPerHead(p, t) {
+    const started = (p.assignments[t] && p.assignments[t].turns) || 0;
+    return Math.ceil(TECHS[t].cost * (started === 0 ? 1 : CONFIG.researchContinuationRate));
   }
 
-  function buildCost(p, type) {
+  // chance de découverte ce tour-ci avec N chercheurs affectés
+  function researchChance(t, researchers) {
+    return Math.min(CONFIG.researchMaxChance, 1 - Math.pow(1 - TECHS[t].chance, researchers));
+  }
+
+  // le coût en argent/matière augmente avec l'éloignement de la zone visée
+  // (logistique) ; le coût en ressources rares, lui, ne change pas.
+  // le coût en ergols (carburant d'acheminement) grandit avec l'éloignement,
+  // sauf sur la Comète elle-même : c'est la source de la glace qui raffine
+  // les ergols, l'exempter évite un blocage impossible (il faudrait des
+  // ergols pour y aller, mais des ergols n'existent qu'une fois qu'on y est)
+  // la Lune (tier 2) reste accessible tôt sans ergols — seules les zones
+  // vraiment lointaines (Ceinture et au-delà) en demandent, pour ne pas
+  // retarder toute expansion derrière la chaîne de raffinage
+  function zoneErgolsCost(zoneId) {
+    const z = zone(zoneId);
+    return z.rare === "glace" || z.tier < 3 ? 0 : z.tier - 2;
+  }
+
+  function buildCost(type, zoneId) {
     const c = INFRA[type].cost;
-    const k = hasTech(p, "logistique") ? 0.75 : 1;
-    return { money: Math.ceil((c.money || 0) * k), material: Math.ceil((c.material || 0) * k), rares: { ...(c.rares || {}) } };
+    const k = ZONE_COST_MULT(zoneId);
+    const rares = { ...(c.rares || {}) };
+    const ergols = zoneErgolsCost(zoneId);
+    if (ergols) rares.ergols = (rares.ergols || 0) + ergols;
+    return { money: Math.ceil((c.money || 0) * k), material: Math.ceil((c.material || 0) * k), rares };
   }
 
+  // la forêt sombre ne guette qu'une fois l'humanité devenue visible (jalon
+  // CONFIG.darkForestTrigger atteint par n'importe quel joueur) — pas à une
+  // date arbitraire, pour laisser le temps de se développer sans pression.
   function darkForestRisk(s) {
-    if (s.turn < CONFIG.darkForestStart) return 0;
-    return Math.min(CONFIG.darkForestMax, CONFIG.darkForestStep * (s.turn - CONFIG.darkForestStart + 1));
+    if (s.darkForestCloaked || s.darkForestTriggerTurn == null) return 0;
+    const elapsed = s.turn - s.darkForestTriggerTurn;
+    if (elapsed < 0) return 0;
+    return Math.min(CONFIG.darkForestMax, CONFIG.darkForestStep * (elapsed + 1));
   }
 
   // ------------------------------------------------------------- new game
 
   function newGame(opts = {}) {
-    const n = Math.max(3, Math.min(5, opts.players || 4));
+    const n = Math.max(1, Math.min(5, opts.players || 4));
     const s = {
       turn: 1,
       seed: opts.seed || 1,
       rng: opts.seed || 1,
       planet: CONFIG.planetHealth,
+      darkForestTriggerTurn: null, // tour où l'humanité est devenue visible (cf. CONFIG.darkForestTrigger) ; null tant que personne n'a atteint le jalon
+      darkForestCloaked: false, // jalon "cloak" (COM-7 + OBS-8) atteint : neutralise définitivement la forêt sombre
       players: [],
       offers: [],
       loans: [],
@@ -244,7 +423,7 @@
       nextId: 1,
     };
     for (let i = 0; i < n; i++) {
-      const home = HOMES[i];
+      const home = "terre"; // tous les joueurs démarrent au même endroit, avec les mêmes ressources
       const rare = zone(home).rare;
       const p = {
         id: i,
@@ -253,10 +432,12 @@
         strategy: (opts.strategies && opts.strategies[i]) || "humain",
         money: rare ? CONFIG.startMoney : CONFIG.bankerStartMoney,
         material: CONFIG.startMaterial,
-        research: 0,
+        materialPrice: CONFIG.defaultMaterialPrice,
+        assignments: {}, // { [techId]: { researchers, turns } } — recherche en cours
         rares: {},
         prices: {},
         techs: [],
+        milestones: [],
         infras: [],
         shares: { [i]: CONFIG.shares },
         status: "actif",
@@ -284,36 +465,87 @@
     return null;
   }
 
-  // arbitrage irréversible : l'argent / la matière versés à la recherche sont perdus
-  function invest(s, pid, money, material) {
-    const p = player(s, pid);
-    const g = guard(s, p);
-    if (g) return g;
-    money = Math.max(0, Math.floor(+money || 0));
-    material = Math.max(0, Math.floor(+material || 0));
-    if (!money && !material) return fail("Rien à investir");
-    if (p.money < money || p.material < material) return fail("Ressources insuffisantes");
-    p.money -= money;
-    p.material -= material;
-    p.research += money + material;
-    log(s, "recherche", `${p.name} investit ${money} ₵ et ${material} matière dans la recherche`, [pid]);
-    return ok("Investi");
-  }
-
-  function unlockTech(s, pid, t) {
+  // affecte (ou réaffecte) des chercheurs à une techno ; 0 arrête la recherche.
+  // Le coût est prélevé chaque tour (research(), phase de fin de tour) tant
+  // que l'affectation reste active — pari risqué, rien n'est remboursé.
+  function assignResearch(s, pid, t, researchers) {
     const p = player(s, pid);
     const g = guard(s, p);
     if (g) return g;
     if (!TECHS[t]) return fail("Technologie inconnue");
     if (hasTech(p, t)) return fail("Déjà débloquée");
-    const cost = techCost(p, t);
-    if (p.research < cost) return fail(`Il faut ${cost} points de recherche`);
-    for (const r in TECHS[t].rare) if ((p.rares[r] || 0) < TECHS[t].rare[r]) return fail(`Il faut ${TECHS[t].rare[r]} ${RARES[r]}`);
-    p.research -= cost;
-    for (const r in TECHS[t].rare) p.rares[r] -= TECHS[t].rare[r];
-    p.techs.push(t);
-    log(s, "recherche", `${p.name} débloque ${TECHS[t].name}`, [pid]);
-    return ok(`${TECHS[t].name} débloquée`);
+    const missing = TECHS[t].prereqs.filter((r) => !hasTech(p, r));
+    if (missing.length) return fail(`Prérequis manquant : ${missing.map((r) => TECHS[r].name).join(", ")}`);
+    researchers = Math.max(0, Math.floor(+researchers || 0));
+    if (!researchers) {
+      if (p.assignments[t]) {
+        delete p.assignments[t];
+        log(s, "recherche", `${p.name} arrête la recherche sur ${TECHS[t].name}`, [pid]);
+      }
+      return ok("Recherche arrêtée");
+    }
+    const existing = p.assignments[t];
+    if (!existing) {
+      // premier engagement sur cette techno : il faut un laboratoire pour
+      // accueillir les chercheurs, et l'équipement spécialisé (rare) requis
+      if (!p.infras.some((i) => i.type === "labo")) return fail("Il faut un Laboratoire pour affecter des chercheurs");
+      const need = TECHS[t].rare || {};
+      for (const r in need) if ((p.rares[r] || 0) < need[r]) return fail(`Équipement requis : ${need[r]} ${RARES[r]}`);
+      for (const r in need) p.rares[r] -= need[r];
+    }
+    p.assignments[t] = { researchers, turns: existing ? existing.turns : 0 };
+    log(s, "recherche", `${p.name} affecte ${researchers} chercheur(s) à ${TECHS[t].name}`, [pid]);
+    return ok("Chercheurs affectés");
+  }
+
+  // résout chaque recherche en cours : prélève le coût du tour, tente la
+  // découverte. Un tour non financé (faute d'argent) arrête l'affectation.
+  function research(s) {
+    for (const p of activePlayers(s)) {
+      for (const t of Object.keys(p.assignments)) {
+        const a = p.assignments[t];
+        if (hasTech(p, t)) {
+          delete p.assignments[t];
+          continue;
+        }
+        const cost = researchCostPerHead(p, t) * a.researchers;
+        if (p.money < cost) {
+          log(s, "recherche", `${p.name} ne peut plus financer ${TECHS[t].name} (${cost} ₵) : chercheurs licenciés`, [p.id]);
+          delete p.assignments[t];
+          continue;
+        }
+        p.money -= cost;
+        a.turns++;
+        // ancienneté : rester affecté longtemps sur la même techno donne un
+        // bonus plafonné (expérience de l'équipe), pour décourager de
+        // licencier/réembaucher les chercheurs à chaque tour
+        const seniority = Math.min(CONFIG.seniorityBonusMax, Math.floor(a.turns / CONFIG.seniorityBonusTurns) * CONFIG.seniorityBonusPerBlock);
+        const chance = Math.min(CONFIG.researchMaxChance, researchChance(t, a.researchers) + seniority);
+        if (rand(s) < chance) {
+          p.techs.push(t);
+          delete p.assignments[t];
+          log(s, "recherche", `${p.name} découvre ${TECHS[t].name} !`, [p.id]);
+        } else {
+          log(s, "recherche", `${p.name} poursuit ${TECHS[t].name} (${a.researchers} chercheur(s), ${Math.round(chance * 100)} % de chance, ${cost} ₵) — sans succès`, [p.id]);
+        }
+      }
+    }
+  }
+
+  function checkMilestones(s, p) {
+    for (const m of MILESTONES) {
+      if (p.milestones.includes(m.id) || !m.need.every((t) => hasTech(p, t))) continue;
+      p.milestones.push(m.id);
+      log(s, "jalon", `${p.name} atteint un jalon : ${m.name}`, [p.id]);
+      if (m.id === CONFIG.darkForestTrigger && s.darkForestTriggerTurn == null) {
+        s.darkForestTriggerTurn = s.turn;
+        log(s, "forêt sombre", `${p.name} rend l'humanité visible (${m.name}) — la forêt sombre commence à guetter`, [p.id]);
+      }
+      if (m.id === "cloak" && !s.darkForestCloaked) {
+        s.darkForestCloaked = true;
+        log(s, "forêt sombre", `${p.name} parvient à camoufler toute la galaxie — la forêt sombre ne représente plus une menace`, [p.id]);
+      }
+    }
   }
 
   function build(s, pid, type, zoneId, mode = "prudent") {
@@ -323,9 +555,11 @@
     const d = INFRA[type];
     if (!d || d.buildable === false) return fail("Infrastructure inconnue");
     if (!zone(zoneId)) return fail("Zone inconnue");
+    const z = zone(zoneId);
+    if (z.reachTech && !hasTech(p, z.reachTech)) return fail(`Trop loin : nécessite ${TECHS[z.reachTech].name}`);
     if (d.tech && !hasTech(p, d.tech)) return fail(`Nécessite ${TECHS[d.tech].name}`);
-    if (type === "extracteur" && !zone(zoneId).rare) return fail("Pas de ressource rare dans cette zone");
-    const c = buildCost(p, type);
+    if (type === "extracteur" && !z.rare) return fail("Pas de ressource rare dans cette zone");
+    const c = buildCost(type, zoneId);
     if (p.money < c.money || p.material < c.material) return fail(`Coût : ${c.money} ₵ + ${c.material} matière`);
     for (const r in c.rares) if ((p.rares[r] || 0) < c.rares[r]) return fail(`Il faut ${c.rares[r]} ${RARES[r]}`);
     p.money -= c.money;
@@ -371,6 +605,43 @@
     flow(s, se.id, b.id, qty * CONFIG.defaultRarePrice);
     s.trades.push({ turn: s.turn, buyer: b.id, seller: se.id, rare, qty, price: se.prices[rare] });
     log(s, "marché", `${b.name} achète ${qty} ${RARES[rare]} à ${se.name} pour ${cost} ₵ (${se.prices[rare]} ₵/u)`, [b.id, se.id]);
+    return ok("Achat effectué");
+  }
+
+  function setMaterialPrice(s, pid, price) {
+    const p = player(s, pid);
+    const g = guard(s, p);
+    if (g) return g;
+    price = Math.max(1, Math.round(+price || 1));
+    if (p.materialPrice === price) return ok();
+    const old = p.materialPrice;
+    p.materialPrice = price;
+    log(s, "prix", `${p.name} passe le prix de la matière première de ${old} à ${price} ₵`, [pid]);
+    return ok("Prix mis à jour");
+  }
+
+  // marché de matière première : les joueurs avancés dans l'extraction
+  // peuvent revendre leurs surplus à ceux qui construisent, plutôt que de
+  // ne trafiquer que les 4 ressources rares
+  function buyMaterial(s, buyerId, sellerId, qty) {
+    const b = player(s, buyerId);
+    const se = player(s, sellerId);
+    const g = guard(s, b) || guard(s, se);
+    if (g) return g;
+    qty = Math.floor(+qty || 0);
+    if (b === se) return fail("Impossible d'acheter à soi-même");
+    if (qty <= 0) return fail("Quantité invalide");
+    if (se.material < qty) return fail(`${se.name} n'a que ${se.material} matière`);
+    const cost = qty * se.materialPrice;
+    if (b.money < cost) return fail(`Il faut ${cost} ₵`);
+    b.money -= cost;
+    se.money += cost;
+    se.material -= qty;
+    b.material += qty;
+    flow(s, b.id, se.id, cost);
+    flow(s, se.id, b.id, qty * CONFIG.defaultMaterialPrice);
+    s.trades.push({ turn: s.turn, buyer: b.id, seller: se.id, rare: "material", qty, price: se.materialPrice });
+    log(s, "marché", `${b.name} achète ${qty} matière à ${se.name} pour ${cost} ₵ (${se.materialPrice} ₵/u)`, [b.id, se.id]);
     return ok("Achat effectué");
   }
 
@@ -588,7 +859,7 @@
   // ---------------------------------------------------------- turn phases
 
   function produce(s, p) {
-    const prod = { money: 0, material: 0, research: 0, rares: {} };
+    const prod = { money: 0, material: 0, rares: {} };
     for (const i of p.infras) {
       const d = INFRA[i.type];
       const eff = i.hp >= d.hp ? 1 : 0.5;
@@ -602,17 +873,15 @@
       }
       const home = zone(p.home);
       let baseMoney = d.prod.money || 0;
-      if (i.type === "base" && !home.rare) baseMoney += 6; // le financeur n'a pas de rare, mais plus de revenus
+      if (i.type === "base" && !home.rare) baseMoney += 6; // foyer sans rare (la Terre, pour tout le monde) : compensé par plus de revenus
       prod.money += Math.round(baseMoney * eff);
       prod.material += Math.round((d.prod.material || 0) * eff);
-      prod.research += Math.round((d.prod.research || 0) * eff);
       const rare = d.prod.homeRare ? home.rare : d.prod.zoneRare ? zone(i.zone).rare : null;
       if (rare) prod.rares[rare] = (prod.rares[rare] || 0) + Math.round((d.prod.homeRare || d.prod.zoneRare) * eff);
     }
     const maintenance = (p.infras.length - 1) * CONFIG.maintenance;
     p.money += prod.money - maintenance;
     p.material += prod.material;
-    p.research += prod.research;
     for (const r in prod.rares) p.rares[r] = (p.rares[r] || 0) + prod.rares[r];
 
     // dividendes versés aux actionnaires extérieurs
@@ -653,6 +922,7 @@
   // beaucoup si elle a été placée de façon agressive.
   function incidents(s) {
     for (const z of ZONES) {
+      if (z.safe) continue; // la Terre est le foyer commun : pas de conflit d'empiètement là-bas
       const here = [];
       for (const p of activePlayers(s)) for (const i of p.infras) if (i.zone === z.id) here.push({ p, i });
       // chaque infrastructure "arrivée après" risque un incident par tour
@@ -666,8 +936,7 @@
         const b = older[Math.floor(rand(s) * older.length)];
         const voluntary = a.i.mode === "agressif";
         let chance = voluntary ? CONFIG.incidentAggressive : CONFIG.incidentBase;
-        if (voluntary && hasTech(a.p, "armement")) chance *= 2;
-        if (hasTech(b.p, "blindage")) chance /= 2;
+        if (hasTech(b.p, "STR-6")) chance /= 2; // blindage anti-radiations : atténue aussi les dégâts d'empiètement
         if (rand(s) < chance) damage(s, a.p, b.p, b.i, voluntary);
       }
     }
@@ -686,7 +955,7 @@
   function pollution(s) {
     let total = 0;
     for (const p of activePlayers(s)) {
-      const k = hasTech(p, "recyclage") ? 0.5 : 1;
+      const k = hasTech(p, "SUP-4") ? 0.5 : 1; // recyclage de l'eau/nourriture : réduit aussi la pollution
       for (const i of p.infras) total += INFRA[i.type].pollution * k;
     }
     const delta = CONFIG.pollutionRegen - total;
@@ -729,7 +998,17 @@
   function checkEnd(s) {
     if (s.ended) return s.ended;
     const alive = activePlayers(s);
-    if (s.planet <= 0) {
+    const allTechCount = Object.keys(TECHS).length;
+    const ascended = alive.find((p) => p.techs.length >= allTechCount);
+    if (ascended) {
+      // maîtrise totale de l'arbre technologique : un vaisseau doté de
+      // toutes les technologies avancées part vers d'autres galaxies
+      s.ended = {
+        type: "galactique",
+        text: `Victoire galactique : ${ascended.name} a maîtrisé toutes les technologies et s'élance vers d'autres galaxies à bord d'un vaisseau ultime.`,
+        winners: [ascended.id],
+      };
+    } else if (s.planet <= 0) {
       s.ended = { type: "collective", text: "Défaite collective : la planète principale est détruite écologiquement. Personne ne gagne.", winners: [] };
     } else if (!alive.length) {
       s.ended = { type: "collective", text: "Défaite collective : aucun survivant.", winners: [] };
@@ -740,7 +1019,8 @@
       const type = bought >= others.length - bought ? "économique" : "guerrière";
       s.ended = { type, text: `Victoire ${type} de ${w.name}.`, winners: [w.id] };
     } else if (s.turn >= CONFIG.maxTurns) {
-      s.ended = { type: "narrative", text: `Victoire narrative : ${alive.map((p) => p.name).join(", ")} ont survécu à la forêt sombre.`, winners: alive.map((p) => p.id) };
+      const cloak = s.darkForestCloaked ? " L'humanité a même réussi à camoufler toute la galaxie face à la forêt sombre." : "";
+      s.ended = { type: "narrative", text: `Victoire narrative : ${alive.map((p) => p.name).join(", ")} ont survécu à la forêt sombre.${cloak}`, winners: alive.map((p) => p.id) };
     }
     if (s.ended) log(s, "fin", s.ended.text, s.ended.winners);
     return s.ended;
@@ -778,6 +1058,8 @@
     if (botHooks.act) for (const p of s.players) if (isActive(p) && p.strategy !== "humain" && !s.ended) botHooks.act(s, p);
     if (s.ended) return ok();
     for (const p of activePlayers(s)) produce(s, p);
+    research(s);
+    for (const p of activePlayers(s)) checkMilestones(s, p);
     incidents(s);
     loansDue(s);
     pollution(s);
@@ -793,12 +1075,13 @@
   }
 
   const api = {
-    RARES, ZONES, CONFIG, INFRA, TECHS,
+    RARES, ZONES, CONFIG, INFRA, TECHS, TECH_CATEGORIES, MILESTONES,
     newGame, endTurn, setBots,
-    invest, unlockTech, build, setPrice, buyRare,
+    assignResearch, researchCostPerHead, researchChance, build, setPrice, buyRare,
+    setMaterialPrice, buyMaterial, materialPrice,
     proposeTrade, proposeLoan, acceptOffer, refuseOffer, cancelOffer,
     repayLoan, forgiveLoan, buyout, canBuyout, buyoutCost,
-    equity, sharePrice, visibility, techCost, buildCost, marketPrice,
+    equity, sharePrice, visibility, buildCost, marketPrice,
     bundleValue, normBundle, describeBundle, debtOf, receivableOf, outstanding,
     darkForestRisk, isActive, activePlayers, hasTech, zone, rand,
   };

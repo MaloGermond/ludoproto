@@ -20,8 +20,31 @@
   const THRESHOLD = { equilibre: 1, specialiste: 0.95, etrangleur: 1.2, preteur: 1.05, agressif: 1.3, furtif: 1.1, pirate: 0.9 };
 
   const others = (s, p) => G.activePlayers(s).filter((o) => o !== p);
-  const homeRare = (p) => G.zone(p.home).rare;
   const count = (p, type) => p.infras.filter((i) => i.type === type).length;
+  const rareZones = ZONES.filter((z) => z.rare);
+
+  // rare déjà exploitée par le joueur (son premier extracteur), sinon rien —
+  // remplace l'ancien "home" fixe : la spécialisation se gagne en jeu
+  function specialtyRare(p) {
+    const e = p.infras.find((i) => i.type === "extracteur");
+    return e ? G.zone(e.zone).rare : null;
+  }
+
+  // zone rare la moins disputée (le moins d'infras d'autres joueurs) parmi
+  // celles déjà à portée technologique, pour choisir où étendre son activité
+  // (sinon la plus proche, en attendant d'avoir la technologie requise)
+  function chosenZone(s, p) {
+    const load = (z) => G.activePlayers(s).filter((o) => o !== p).reduce((a, o) => a + o.infras.filter((i) => i.zone === z.id).length, 0);
+    const reachable = rareZones.filter((z) => !z.reachTech || G.hasTech(p, z.reachTech));
+    const pool = reachable.length ? reachable : rareZones;
+    return [...pool].sort((a, b) => load(a) - load(b) || a.tier - b.tier || a.id.localeCompare(b.id))[0].id;
+  }
+
+  // zone où étendre son activité rare : celle déjà choisie s'il y en a une, sinon la moins disputée
+  function targetZone(s, p) {
+    const r = specialtyRare(p);
+    return r ? rareZones.find((z) => z.rare === r).id : chosenZone(s, p);
+  }
   const defaultedOn = (s, a, b) => s.rel[a.id][b.id].defaults > 0;
 
   function valueFor(s, p, b) {
@@ -94,51 +117,76 @@
     return true;
   }
 
-  function pursueTech(s, p, t, { reserve = 15, maxInvest = 12, maxSpend = 30 } = {}) {
-    if (G.hasTech(p, t)) return true;
-    const cost = G.techCost(p, t);
-    if (p.research < cost) {
-      const cash = Math.min(maxInvest, Math.max(0, p.money - reserve), cost - p.research);
-      const mat = Math.min(Math.max(0, p.material - 20), cost - p.research - cash);
-      if (cash + mat > 0) G.invest(s, p.id, cash, mat);
-    }
-    if (p.research >= cost && buyMissing(s, p, TECHS[t].rare, maxSpend)) return G.unlockTech(s, p.id, t).ok;
-    return false;
+  // prochaine techno du chemin dont les prérequis sont remplis, sinon la
+  // moins chère disponible ailleurs dans l'arbre (progrès garanti)
+  function nextAvailableTech(p, path) {
+    const ready = (t) => !G.hasTech(p, t) && TECHS[t].prereqs.every((r) => G.hasTech(p, r));
+    return path.find(ready) || Object.keys(TECHS).filter(ready).sort((a, b) => TECHS[a].cost - TECHS[b].cost)[0] || null;
   }
 
-  function affordable(p, type, reserve) {
-    const c = G.buildCost(p, type);
+  // affecte des chercheurs (dans la limite du budget) à la prochaine techno
+  // du chemin — une recherche à la fois, pour rester lisible et prudent.
+  // Un laboratoire est requis avant toute recherche : on le construit d'abord.
+  function advanceResearch(s, p, path, { researchers = 2, reserve = 15 } = {}) {
+    if (!p.infras.some((i) => i.type === "labo")) {
+      tryBuild(s, p, "labo", p.home, "prudent", reserve);
+      return;
+    }
+    if (Object.keys(p.assignments).length) return;
+    const t = nextAvailableTech(p, path);
+    if (!t) return;
+    const need = TECHS[t].rare || {};
+    for (const r in need) if ((p.rares[r] || 0) < need[r]) return; // équipement manquant, on attend d'en avoir
+    const perHead = G.researchCostPerHead(p, t);
+    const n = Math.min(researchers, Math.max(0, Math.floor((p.money - reserve) / perHead)));
+    if (n > 0) G.assignResearch(s, p.id, t, n);
+  }
+
+  // chemin partagé vers EXT-6 (accès à l'extraction de ressource rare) :
+  // fondations Structure/Guidage/Communications/Recherche/Propulsion, puis
+  // la branche Extraction proprement dite.
+  const RARE_ACCESS_PATH = [
+    "STR-1", "GUI-1", "COM-1", "REC-1", "PRO-1",
+    "STR-2", "GUI-2", "GUI-3", "COM-2", "REC-2", "PRO-2",
+    "STR-3", "GUI-4", "EXT-1",
+    "PRO-3", "GUI-6", "EXT-2",
+    "EXT-3", "EXT-4", "EXT-5", "EXT-6",
+  ];
+  // chemin discret pour les stratégies qui n'ont pas vocation à exploiter
+  // une planète (peu d'infrastructures, faible empreinte)
+  const LOW_KEY_PATH = ["REC-1", "OBS-1", "REC-2", "OBS-2"];
+
+  function affordable(p, type, zoneId, reserve) {
+    const c = G.buildCost(type, zoneId);
     return p.money - c.money >= reserve && p.material >= c.material;
   }
 
-  function rareCostOk(s, p, type, maxSpend = 25) {
-    return buyMissing(s, p, G.buildCost(p, type).rares, maxSpend);
+  function rareCostOk(s, p, type, zoneId, maxSpend = 25) {
+    return buyMissing(s, p, G.buildCost(type, zoneId).rares, maxSpend);
   }
 
   // certaines stratégies freinent les constructions polluantes quand la planète va mal
   const ECO_AWARE = ["equilibre", "specialiste", "furtif"];
 
   function tryBuild(s, p, type, zoneId, mode = "prudent", reserve = 10) {
-    if (!affordable(p, type, reserve)) return false;
+    const z = G.zone(zoneId);
+    if (z.reachTech && !G.hasTech(p, z.reachTech)) return false; // trop loin pour l'instant
+    if (!affordable(p, type, zoneId, reserve)) return false;
     if (ECO_AWARE.includes(p.strategy) && s.planet < 50 && INFRA[type].pollution >= 1) return false;
-    if (!rareCostOk(s, p, type)) return false;
-    if (!affordable(p, type, reserve)) return false;
+    if (!rareCostOk(s, p, type, zoneId)) return false;
+    if (!affordable(p, type, zoneId, reserve)) return false;
     return G.build(s, p.id, type, zoneId, mode).ok;
-  }
-
-  function nextTech(p, list) {
-    return list.find((t) => !G.hasTech(p, t));
   }
 
   function quietestZone(s, p) {
     const load = (z) => G.activePlayers(s).filter((o) => o !== p).reduce((a, o) => a + o.infras.filter((i) => i.zone === z.id).length, 0);
-    return [...ZONES].sort((a, b) => load(a) - load(b) || (a.id === p.home ? -1 : 1))[0].id;
+    const reachable = ZONES.filter((z) => !z.reachTech || G.hasTech(p, z.reachTech));
+    return [...reachable].sort((a, b) => load(a) - load(b) || (a.id === p.home ? -1 : 1))[0].id;
   }
 
   function sellLicence(s, p) {
-    const mine = p.techs.filter((t) => t !== "logistique");
     for (const o of others(s, p)) {
-      const t = mine.find((x) => !G.hasTech(o, x));
+      const t = p.techs.find((x) => !G.hasTech(o, x));
       const recent = s.offers.some((x) => x.from === p.id && x.to === o.id && s.turn - x.turn < 4);
       if (t && !recent) {
         G.proposeTrade(s, p.id, o.id, { techs: [t] }, { money: 25 }, "licence");
@@ -162,28 +210,29 @@
   const ACT = {
     equilibre(s, p) {
       repayDue(s, p);
-      const t = nextTech(p, ["logistique", "recyclage", "forage", "blindage"]);
-      if (t) pursueTech(s, p, t);
-      const type = count(p, "comptoir") <= count(p, "mine") ? "comptoir" : "mine";
-      if (p.infras.length < 7) tryBuild(s, p, type, p.home);
+      advanceResearch(s, p, RARE_ACCESS_PATH, { researchers: 2, reserve: 15 });
+      if (G.hasTech(p, "EXT-6") && count(p, "extracteur") < 1) tryBuild(s, p, "extracteur", targetZone(s, p));
+      else {
+        const type = count(p, "comptoir") <= count(p, "mine") ? "comptoir" : "mine";
+        if (p.infras.length < 7) tryBuild(s, p, type, p.home);
+      }
     },
 
     specialiste(s, p) {
       repayDue(s, p);
-      const r = homeRare(p);
-      const path = Object.keys(TECHS).filter((t) => TECHS[t].rare[r]).concat(["logistique"]);
+      const zoneId = targetZone(s, p);
+      const r = G.zone(zoneId).rare;
       if (!count(p, "labo")) tryBuild(s, p, "labo", p.home);
-      const t = nextTech(p, path);
-      if (t) pursueTech(s, p, t, { maxInvest: 18 });
-      if (G.hasTech(p, "forage") && count(p, "extracteur") < 2) tryBuild(s, p, "extracteur", p.home);
+      advanceResearch(s, p, RARE_ACCESS_PATH, { researchers: 3, reserve: 12 });
+      if (G.hasTech(p, "EXT-6") && count(p, "extracteur") < 2) tryBuild(s, p, "extracteur", zoneId);
       else if (p.infras.length < 6) tryBuild(s, p, "mine", p.home);
-      if (r) G.setPrice(s, p.id, r, 4);
+      if (specialtyRare(p)) G.setPrice(s, p.id, r, 4);
       sellLicence(s, p);
     },
 
     etrangleur(s, p) {
       repayDue(s, p);
-      const r = homeRare(p);
+      const r = specialtyRare(p);
       if (r) {
         // prix qui monte tant qu'on m'achète, redescend quand plus personne n'achète
         const sold = s.trades.filter((x) => x.seller === p.id && x.rare === r && x.turn >= s.turn - 1).length;
@@ -195,10 +244,9 @@
         if (o.status === "faillite" || G.sharePrice(s, o) < 2) buySharesOf(s, p, o, 15, 1.1);
         else if (p.money > 150) buySharesOf(s, p, o, 10, 1.35);
       }
-      if (G.hasTech(p, "forage") && count(p, "extracteur") < 2) tryBuild(s, p, "extracteur", p.home);
+      if (G.hasTech(p, "EXT-6") && count(p, "extracteur") < 2) tryBuild(s, p, "extracteur", targetZone(s, p));
       else if (p.infras.length < 6) tryBuild(s, p, "comptoir", p.home, "prudent", 25);
-      const t = nextTech(p, ["forage", "logistique"]);
-      if (t) pursueTech(s, p, t, { reserve: 30 });
+      advanceResearch(s, p, RARE_ACCESS_PATH, { researchers: 2, reserve: 30 });
     },
 
     preteur(s, p) {
@@ -215,26 +263,25 @@
         if (l.lender === p.id && l.status === "défaut") buySharesOf(s, p, s.players[l.borrower], 20, 1);
       }
       if (p.infras.length < 5) tryBuild(s, p, "comptoir", p.home, "prudent", 40);
-      const t = nextTech(p, ["logistique"]);
-      if (t) pursueTech(s, p, t, { reserve: 40 });
+      advanceResearch(s, p, RARE_ACCESS_PATH, { researchers: 1, reserve: 40 });
     },
 
     agressif(s, p) {
       repayDue(s, p);
-      const t = nextTech(p, ["forage", "armement"]);
-      if (t) pursueTech(s, p, t, { maxSpend: 40 });
-      if (G.hasTech(p, "forage")) {
+      advanceResearch(s, p, RARE_ACCESS_PATH, { researchers: 2, reserve: 20 });
+      if (G.hasTech(p, "EXT-6")) {
+        // vise la zone où le rival le plus riche a déjà investi, pour le gêner
         const richest = others(s, p)
-          .filter((o) => G.zone(o.home).rare && G.zone(o.home).rare !== homeRare(p))
+          .filter((o) => o.infras.some((i) => i.type === "extracteur"))
           .sort((a, b) => G.equity(s, b) - G.equity(s, a))[0];
-        if (richest && count(p, "extracteur") < 4) tryBuild(s, p, "extracteur", richest.home, "agressif", 5);
+        const zoneId = richest ? richest.infras.find((i) => i.type === "extracteur").zone : targetZone(s, p);
+        if (count(p, "extracteur") < 4) tryBuild(s, p, "extracteur", zoneId, "agressif", 5);
       } else if (p.infras.length < 4) tryBuild(s, p, "mine", p.home);
     },
 
     furtif(s, p) {
       repayDue(s, p, true);
-      const t = nextTech(p, ["furtivite", "recyclage", "blindage"]);
-      if (t) pursueTech(s, p, t, { maxSpend: 40 });
+      advanceResearch(s, p, LOW_KEY_PATH, { researchers: 1, reserve: 40 });
       if (p.infras.length < 3) tryBuild(s, p, p.infras.length === 1 ? "comptoir" : "mine", quietestZone(s, p));
     },
 
@@ -245,8 +292,7 @@
         if (lender) G.proposeLoan(s, p.id, lender.id, { lender: "to", principal: { money: 25 }, repay: 32, due: 2 });
       }
       if (p.infras.length < 6) tryBuild(s, p, "comptoir", p.home, "prudent", 5);
-      const t = nextTech(p, ["logistique"]);
-      if (t) pursueTech(s, p, t);
+      advanceResearch(s, p, LOW_KEY_PATH, { researchers: 1, reserve: 20 });
     },
   };
 

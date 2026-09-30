@@ -2,7 +2,7 @@
 // Hot-seat : on choisit "en tant que" qui l'on agit ; les joueurs non
 // humains sont joués par une stratégie automatique à la fin du tour.
 
-const { RARES, ZONES, INFRA, TECHS, CONFIG } = Game;
+const { RARES, ZONES, INFRA, TECHS, TECH_CATEGORIES, MILESTONES, CONFIG } = Game;
 const { STRATEGIES } = Strategies;
 
 let S = null;
@@ -79,11 +79,15 @@ function meter(value, max, color) {
 function renderStatus() {
   const planetColor = S.planet > 60 ? "var(--good)" : S.planet > 30 ? "var(--warn)" : "var(--bad)";
   const risk = Game.darkForestRisk(S);
-  const nextRisk = Math.min(CONFIG.darkForestMax, CONFIG.darkForestStep * Math.max(0, S.turn - CONFIG.darkForestStart + 2));
+  const triggerName = Game.MILESTONES.find((m) => m.id === CONFIG.darkForestTrigger).name;
+  const forestLabel =
+    S.darkForestTriggerTurn == null
+      ? `<span class="muted">pas encore visible (jalon : ${triggerName})</span>`
+      : `<strong class="warn">${Math.round(risk * 100)} %</strong>`;
   $("#status").innerHTML = `
     <span>Tour <strong>${S.turn}</strong> / ${CONFIG.maxTurns}</span>
     <span>Planète ${meter(S.planet, CONFIG.planetHealth, planetColor)} ${fmt(S.planet)} <span class="muted">(pollution ${fmt(S.lastPollution || 0)} − régén. ${CONFIG.pollutionRegen}/tour)</span></span>
-    <span>Forêt sombre ${risk ? `<strong class="warn">${Math.round(risk * 100)} %</strong>` : `<span class="muted">dès le tour ${CONFIG.darkForestStart} (${Math.round(nextRisk * 100)} %)</span>`}</span>`;
+    <span>Forêt sombre ${forestLabel}</span>`;
   const end = $("#ending");
   end.hidden = !S.ended;
   if (S.ended) end.textContent = `🏁 ${S.ended.text}`;
@@ -141,17 +145,20 @@ function renderPlayers() {
           <strong>${p.name}</strong>
           <select data-strategy="${p.id}" title="${esc(STRATEGIES[p.strategy].desc)}">${strat}</select>
         </header>
-        <div class="muted">Base : ${Game.zone(p.home).name}${Game.zone(p.home).rare ? ` (${RARES[Game.zone(p.home).rare]})` : " (financeur)"}</div>
+        <div class="muted">Base : ${Game.zone(p.home).name}</div>
         <div>${statusBadges(p)}</div>
         <dl>
           <dt>Argent</dt><dd class="${p.money < 0 ? "bad" : ""}">${fmt(p.money)} ₵</dd>
           <dt>Matière</dt><dd>${fmt(p.material)}</dd>
-          <dt>Recherche</dt><dd>${fmt(p.research)} pts</dd>
+          <dt>Recherche</dt><dd>${
+            Object.entries(p.assignments).map(([t, a]) => `${TECHS[t].name} (${a.researchers} chercheur(s))`).join(", ") || "—"
+          }</dd>
           <dt>Rares</dt><dd>${rares}</dd>
           <dt>Valeur</dt><dd>${fmt(Game.equity(S, p))} <span class="muted">(${Game.sharePrice(S, p).toFixed(2)} ₵/part)</span></dd>
           <dt>Dette</dt><dd>${debt ? `<span class="bad">${debt} ₵</span>` : "—"}${recv ? ` <span class="muted">/ créances ${recv} ₵</span>` : ""}</dd>
           <dt>Visibilité</dt><dd>${fmt(Game.visibility(p))}</dd>
-          <dt>Techs</dt><dd>${p.techs.map((t) => `<span class="badge">${TECHS[t].name}</span>`).join("") || "—"}</dd>
+          <dt>Techs (${p.techs.length})</dt><dd>${p.techs.slice(-8).map((t) => `<span class="badge">${TECHS[t].name}</span>`).join("") || "—"}</dd>
+          <dt>Jalons</dt><dd>${p.milestones.map((m) => `<span class="badge">${MILESTONES.find((x) => x.id === m).name}</span>`).join("") || "—"}</dd>
           <dt>Actionnaires</dt><dd>${holders || "—"}</dd>
           <dt>Détient</dt><dd>${owned || "—"}</dd>
         </dl>
@@ -171,50 +178,83 @@ function renderActions() {
   const others = S.players.filter((p) => p.id !== actor && Game.isActive(p)).map((p) => [p.id, p.name]);
   fillSelect($("#actor"), everyone);
   $("#actor").value = actor;
-  $("#actor-summary").textContent = `${fmt(me.money)} ₵ · ${fmt(me.material)} matière · ${fmt(me.research)} pts${me.strategy !== "humain" ? " · ⚠ joué par une stratégie à la fin du tour" : ""}`;
+  $("#actor-summary").textContent = `${fmt(me.money)} ₵ · ${fmt(me.material)} matière${me.strategy !== "humain" ? " · ⚠ joué par une stratégie à la fin du tour" : ""}`;
 
-  // recherche
+  // recherche : liste des technos dont les prérequis sont remplis
   const fr = $("#f-research");
+  const available = Object.keys(TECHS)
+    .filter((t) => !Game.hasTech(me, t) && TECHS[t].prereqs.every((r) => Game.hasTech(me, r)))
+    .sort((a, b) => TECH_CATEGORIES[TECHS[a].category].localeCompare(TECH_CATEGORIES[TECHS[b].category]) || TECHS[a].cost - TECHS[b].cost);
   fillSelect(
     fr.tech,
-    Object.keys(TECHS)
-      .filter((t) => !Game.hasTech(me, t))
-      .map((t) => [t, `${TECHS[t].name} — ${Game.techCost(me, t)} pts${Object.keys(TECHS[t].rare).length ? " + " + Object.entries(TECHS[t].rare).map(([r, n]) => `${n} ${RARES[r]}`).join(", ") : ""}`])
+    available.map((t) => [
+      t,
+      `[${TECH_CATEGORIES[TECHS[t].category]}] ${TECHS[t].name} — ${TECHS[t].cost} ₵/chercheur, ${Math.round(TECHS[t].chance * 100)} %/tour`,
+    ])
   );
-  $("[data-hint=tech]").textContent = fr.tech.value ? TECHS[fr.tech.value].desc : "Toutes les technologies sont débloquées";
+  const selected = fr.tech.value;
+  const activeAssignment = me.assignments[selected];
+  $("[data-hint=tech]").textContent = !selected
+    ? available.length
+      ? ""
+      : "Aucune technologie accessible pour l'instant (prérequis manquants)"
+    : `${TECHS[selected].desc ? TECHS[selected].desc + " · " : ""}coût ce tour : ${Game.researchCostPerHead(me, selected)} ₵/chercheur${
+        activeAssignment ? ` (déjà ${activeAssignment.researchers} affecté(s))` : " (mise en place)"
+      }`;
+  const assignedList = Object.entries(me.assignments)
+    .map(([t, a]) => `${TECHS[t].name} (${a.researchers} chercheur(s))`)
+    .join(", ");
+  $("[data-hint=research-active]").textContent = assignedList ? `En cours : ${assignedList}` : "";
 
-  // construction
+  // construction — la zone conditionne l'accès (verrou technologique) et le
+  // coût (plus loin = plus cher), donc on la remplit avant le type d'infra
   const fb = $("#f-build");
+  fillSelect(
+    fb.zone,
+    ZONES.map((z) => {
+      const locked = z.reachTech && !Game.hasTech(me, z.reachTech);
+      const neigh = S.players.filter((p) => p !== me && Game.isActive(p) && p.infras.some((i) => i.zone === z.id)).map((p) => p.name);
+      const mult = 1 + z.tier * 0.4;
+      return [
+        z.id,
+        `${z.name}${z.rare ? ` (${RARES[z.rare]})` : ""} — coût ×${mult.toFixed(1)}${locked ? ` 🔒 ${TECHS[z.reachTech].name}` : ""}${neigh.length ? ` — voisins : ${neigh.join(", ")}` : ""}`,
+      ];
+    })
+  );
   fillSelect(
     fb.type,
     Object.keys(INFRA)
       .filter((k) => INFRA[k].buildable !== false)
       .map((k) => {
-        const c = Game.buildCost(me, k);
+        const c = Game.buildCost(k, fb.zone.value);
         const rares = Object.entries(c.rares).map(([r, n]) => ` + ${n} ${RARES[r]}`).join("");
         return [k, `${INFRA[k].name} (${c.money} ₵ + ${c.material} mat.${rares})${INFRA[k].tech && !Game.hasTech(me, INFRA[k].tech) ? " 🔒" : ""}`];
       })
   );
-  fillSelect(
-    fb.zone,
-    ZONES.map((z) => {
-      const neigh = S.players.filter((p) => p !== me && Game.isActive(p) && p.infras.some((i) => i.zone === z.id)).map((p) => p.name);
-      return [z.id, `${z.name}${z.rare ? ` (${RARES[z.rare]})` : ""}${neigh.length ? ` — voisins : ${neigh.join(", ")}` : ""}`];
-    })
-  );
+  const zoneLocked = Game.zone(fb.zone.value).reachTech && !Game.hasTech(me, Game.zone(fb.zone.value).reachTech);
   const d = INFRA[fb.type.value];
   const prod = Object.entries(d.prod).map(([k, v]) => `+${v} ${{ money: "₵", material: "matière", research: "pts", zoneRare: "rare de la zone" }[k] || k}`);
-  $("[data-hint=build]").textContent = `${prod.join(", ")} / tour · pollution ${d.pollution} · visibilité ${d.visibility}${d.upkeep ? ` · consomme ${Object.entries(d.upkeep).map(([r, n]) => `${n} ${RARES[r]}`).join(", ")} / tour` : ""} · entretien ${CONFIG.maintenance} ₵/tour`;
+  const zoneWarning = zoneLocked ? `⚠ Trop loin : nécessite ${TECHS[Game.zone(fb.zone.value).reachTech].name} · ` : "";
+  $("[data-hint=build]").textContent = `${zoneWarning}${prod.join(", ")} / tour · pollution ${d.pollution} · visibilité ${d.visibility}${d.upkeep ? ` · consomme ${Object.entries(d.upkeep).map(([r, n]) => `${n} ${RARES[r]}`).join(", ")} / tour` : ""} · entretien ${CONFIG.maintenance} ₵/tour`;
 
   // marché
   const fm = $("#f-market");
-  fillSelect(fm.rare, Object.entries(RARES));
-  if (document.activeElement !== fm.price) fm.price.value = me.prices[fm.rare.value];
+  fillSelect(fm.rare, [["material", "Matière première"], ...Object.entries(RARES)]);
+  const isMaterial = fm.rare.value === "material";
+  if (document.activeElement !== fm.price) fm.price.value = isMaterial ? me.materialPrice : me.prices[fm.rare.value];
   fillSelect(
     fm.seller,
-    S.players.filter((p) => p !== me && Game.isActive(p)).map((p) => [p.id, `${p.name} — ${p.rares[fm.rare.value] || 0} dispo à ${p.prices[fm.rare.value]} ₵`])
+    S.players
+      .filter((p) => p !== me && Game.isActive(p))
+      .map((p) =>
+        isMaterial
+          ? [p.id, `${p.name} — ${p.material} dispo à ${p.materialPrice} ₵`]
+          : [p.id, `${p.name} — ${p.rares[fm.rare.value] || 0} dispo à ${p.prices[fm.rare.value]} ₵`]
+      )
   );
-  $("[data-hint=market]").textContent = `Prix moyen ${RARES[fm.rare.value]} : ${fmt(Game.marketPrice(S, fm.rare.value))} ₵`;
+  $("[data-hint=market]").textContent = isMaterial
+    ? `Prix moyen matière première : ${fmt(Game.materialPrice(S))} ₵`
+    : `Prix moyen ${RARES[fm.rare.value]} : ${fmt(Game.marketPrice(S, fm.rare.value))} ₵`;
 
   // troc
   const ft = $("#f-trade");
@@ -275,9 +315,9 @@ function bindActions() {
   const fr = $("#f-research");
   fr.onsubmit = (e) => {
     e.preventDefault();
-    run(() => Game.invest(S, actor, fr.money.value, fr.material.value));
+    run(() => Game.assignResearch(S, actor, fr.tech.value, fr.researchers.value));
   };
-  $("[data-act=unlock]", fr).onclick = () => run(() => Game.unlockTech(S, actor, fr.tech.value));
+  $("[data-act=stop]", fr).onclick = () => run(() => Game.assignResearch(S, actor, fr.tech.value, 0));
   fr.tech.onchange = renderActions;
 
   const fb = $("#f-build");
@@ -286,15 +326,21 @@ function bindActions() {
     run(() => Game.build(S, actor, fb.type.value, fb.zone.value, fb.mode.value));
   };
   fb.type.onchange = renderActions;
+  fb.zone.onchange = renderActions;
 
   const fm = $("#f-market");
   fm.onsubmit = (e) => {
     e.preventDefault();
-    run(() => Game.buyRare(S, actor, +fm.seller.value, fm.rare.value, fm.qty.value));
+    if (fm.rare.value === "material") run(() => Game.buyMaterial(S, actor, +fm.seller.value, fm.qty.value));
+    else run(() => Game.buyRare(S, actor, +fm.seller.value, fm.rare.value, fm.qty.value));
   };
-  $("[data-act=price]", fm).onclick = () => run(() => Game.setPrice(S, actor, fm.rare.value, fm.price.value));
+  $("[data-act=price]", fm).onclick = () =>
+    run(() =>
+      fm.rare.value === "material" ? Game.setMaterialPrice(S, actor, fm.price.value) : Game.setPrice(S, actor, fm.rare.value, fm.price.value)
+    );
   fm.rare.onchange = () => {
-    fm.price.value = P(actor).prices[fm.rare.value];
+    const me = P(actor);
+    fm.price.value = fm.rare.value === "material" ? me.materialPrice : me.prices[fm.rare.value];
     renderActions();
   };
 
