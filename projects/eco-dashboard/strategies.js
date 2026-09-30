@@ -124,7 +124,7 @@
   // rares introuvables à la table (personne n'en a en stock) : ce sont
   // elles qu'il faut aller extraire
   function scarceRares(s) {
-    return ["lune", "cristal", "he3", "glace"].filter((r) => G.activePlayers(s).reduce((a, o) => a + (o.rares[r] || 0), 0) < 3);
+    return ["cristal", "he3", "glace"].filter((r) => G.activePlayers(s).reduce((a, o) => a + (o.rares[r] || 0), 0) < 3);
   }
 
   // zone à ressources : d'abord celles qui produisent une rare introuvable,
@@ -388,7 +388,7 @@
       expand(s, p);
       if (G.hasTech(p, "CON-5") && !count(p, "station")) tryBuild(s, p, "station", targetZone(s, p), "prudent", 30);
       if (p.infras.length < 5) tryBuild(s, p, "mine", homeZone(s));
-      for (const r of ["lune", "cristal", "glace", "he3"]) if ((p.rares[r] || 0) > 4) G.setPrice(s, p.id, r, 4);
+      for (const r of ["cristal", "glace", "he3"]) if ((p.rares[r] || 0) > 4) G.setPrice(s, p.id, r, 4);
       G.setMaterialPrice(s, p.id, p.material > 500 ? 1 : 2);
       sellLicence(s, p);
     },
@@ -396,7 +396,7 @@
     etrangleur(s, p) {
       repayDue(s, p);
       // prix qui montent tant qu'on m'achète, redescendent sinon (rares et ravitaillement)
-      for (const r of ["lune", "cristal", "glace", "he3", "ergols"]) {
+      for (const r of ["cristal", "glace", "he3", "ergols"]) {
         if (!(p.rares[r] > 0)) continue;
         const sold = s.trades.filter((x) => x.seller === p.id && x.rare === r && x.turn >= s.turn - 1).length;
         G.setPrice(s, p.id, r, sold ? Math.ceil(p.prices[r] * 1.25) : Math.max(5, p.prices[r] - 1));

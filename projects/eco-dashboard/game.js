@@ -10,11 +10,12 @@
 
 (function (root) {
   // la "matière" du jeu représente les métaux de construction (fer,
-  // aluminium, titane, laissés implicites) ; le carbone n'est pas une
+  // aluminium, titane, laissés implicites) ; le régolithe lunaire en fait
+  // partie : c'est un matériau de construction local, extrait par les mines
+  // de la Lune, pas une ressource rare. Le carbone n'est pas une
   // ressource : il est partout, sa maîtrise passe par les technologies
   // (STR-4 composites → STR-8 nanomatériaux → STR-9 interaction forte).
   const RARES = {
-    lune: "Régolithe lunaire", // riche en silicium, aluminium, titane, oxygène
     he3: "Hélium-3", // pivot du late game (fusion), récolté sur les géantes gazeuses
     cristal: "Platinoïdes", // astéroïdes métalliques : équipements avancés, catalyseurs, électronique
     glace: "Glace d'eau", // ergols du mid game, support de vie
@@ -34,7 +35,7 @@
   const ZONES = [
     { id: "terre", name: "Terre", tier: 0, inner: true, safe: true, reachTech: null, yield: {}, metals: 1 },
     { id: "orbite", name: "Orbite basse", tier: 1, inner: true, reachTech: "CON-1", yield: {}, metals: 0 },
-    { id: "lune", name: "Lune", tier: 2, inner: true, reachTech: "EXT-3", yield: { lune: 2, glace: 1 }, metals: 1 },
+    { id: "lune", name: "Lune", tier: 2, inner: true, reachTech: "EXT-3", yield: { glace: 1 }, metals: 1.5 }, // régolithe : silicium, aluminium, titane
     { id: "mars", name: "Mars", tier: 3, inner: true, reachTech: "EXT-5", yield: { glace: 2 }, metals: 1, sabatier: true },
     { id: "mercure", name: "Mercure", tier: 3, inner: true, reachTech: "EXT-5", yield: { glace: 1 }, metals: 2 },
     { id: "ceinture", name: "Ceinture d'astéroïdes", tier: 4, inner: true, reachTech: "EXT-6", yield: { cristal: 2, glace: 1 }, metals: 1.5 },
@@ -68,7 +69,7 @@
     xpMult: [1, 1.3, 1.6], // contribution d'un chercheur selon son palier
     researchMaxChance: 0.95, // plafond de chance de découverte par tour
     licenceMode: "access", // "access" : une licence donne la techno ; "bonus" : outillage offert et chercheurs ×2 sur cette techno
-    carbonDiscount: { "STR-8": 0.5, "STR-9": 1 }, // part des coûts en régolithe/platinoïdes épargnée par la maîtrise du carbone
+    carbonDiscount: { "STR-8": 0.5, "STR-9": 1 }, // part des équipements en métaux et platinoïdes épargnée par la maîtrise du carbone
     // forêt sombre
     darkForestTrigger: "orbit", // jalon (cf. MILESTONES) qui rend l'humanité visible
     darkForestPerVis: 0.0005, // risque de lancement d'un projectile par tour, par point de visibilité cumulée de la table
@@ -137,6 +138,7 @@
   // `chance` = probabilité de découverte par chercheur (novice) et par tour :
   // avec N chercheurs (pondérés par leur expérience), 1 - (1 - chance)^N,
   // plafonnée à 95 %. `rare` = équipement spécialisé consommé à l'engagement.
+  // `metals` = équipement en métaux, payé avec l'outillage.
   // `pooled` = recherche collective : les chercheurs de toute la table
   // s'additionnent (cf. research()).
   const TECH_CATEGORIES = {
@@ -168,12 +170,12 @@
     "STR-1": { name: "Corps de fusée en tôle", category: "str", prereqs: [], cost: 10, chance: 0.2 },
     "STR-2": { name: "Réservoirs pressurisés en aluminium", category: "str", prereqs: ["STR-1"], cost: 25, chance: 0.14 },
     "STR-3": { name: "Étagement", category: "str", prereqs: ["STR-2", "PRO-2"], cost: 60, chance: 0.09 },
-    "STR-4": { name: "Composites (fibres de carbone)", category: "str", prereqs: ["STR-2", "REC-2"], cost: 120, chance: 0.07, rare: { lune: 1 } },
+    "STR-4": { name: "Composites (fibres de carbone)", category: "str", prereqs: ["STR-2", "REC-2"], cost: 120, chance: 0.07, metals: 20 },
     "STR-5": { name: "Réservoirs cryogéniques isolés", category: "str", prereqs: ["STR-4"], cost: 200, chance: 0.05 },
     "STR-6": { name: "Blindage anti-radiations", category: "str", prereqs: ["STR-4"], cost: 300, chance: 0.04 },
-    "STR-7": { name: "Alliages haute résistance", category: "str", prereqs: ["STR-4", "REC-2"], cost: 500, chance: 0.03, rare: {lune: 2} },
-    "STR-8": { name: "Nanomatériaux (graphène, nanotubes)", category: "str", prereqs: ["STR-7", "REC-5"], cost: 2000, chance: 0.015, rare: {lune: 4}, desc: "Carbone disponible partout : -50 % sur les coûts en régolithe et platinoïdes" },
-    "STR-9": { name: "Matière à interaction forte", category: "str", prereqs: ["STR-8", "REC-9"], cost: 12000, chance: 0.004, rare: {he3: 3}, desc: "Science-fiction assumée : plus besoin de régolithe ni de platinoïdes ; armadas 50 % plus fortes" },
+    "STR-7": { name: "Alliages haute résistance", category: "str", prereqs: ["STR-4", "REC-2"], cost: 500, chance: 0.03, metals: 50 },
+    "STR-8": { name: "Nanomatériaux (graphène, nanotubes)", category: "str", prereqs: ["STR-7", "REC-5"], cost: 2000, chance: 0.015, metals: 100, rare: {cristal: 2}, desc: "Carbone disponible partout : -50 % sur les équipements en métaux et platinoïdes" },
+    "STR-9": { name: "Matière à interaction forte", category: "str", prereqs: ["STR-8", "REC-9"], cost: 12000, chance: 0.004, rare: {he3: 3}, desc: "Science-fiction assumée : plus besoin d'équipements en métaux ni en platinoïdes ; armadas 50 % plus fortes" },
     // Guidage et contrôle
     "GUI-1": { name: "Trajectoire préprogrammée", category: "gui", prereqs: [], cost: 10, chance: 0.2 },
     "GUI-2": { name: "Gyroscopes et stabilisation", category: "gui", prereqs: ["GUI-1"], cost: 30, chance: 0.12 },
@@ -235,12 +237,12 @@
     "CON-3": { name: "Satellite de communication", category: "con", prereqs: ["CON-2", "COM-3"], cost: 300, chance: 0.05 },
     "CON-4": { name: "Satellite relais", category: "con", prereqs: ["CON-3"], cost: 400, chance: 0.04 },
     "CON-5": { name: "Amarrage en orbite", category: "con", prereqs: ["CON-2", "GUI-5"], cost: 500, chance: 0.04, desc: "Débloque la station de ravitaillement" },
-    "CON-6": { name: "Station spatiale", category: "con", prereqs: ["CON-5", "SUP-4"], cost: 900, chance: 0.03, rare: {lune: 1}, desc: "Débloque le chantier orbital (armadas)" },
+    "CON-6": { name: "Station spatiale", category: "con", prereqs: ["CON-5", "SUP-4"], cost: 900, chance: 0.03, metals: 40, desc: "Débloque le chantier orbital (armadas)" },
     "CON-7": { name: "Bras robotique orbital", category: "con", prereqs: ["CON-6", "GUI-8"], cost: 1200, chance: 0.02 },
     "CON-8": { name: "Constellations de satellites", category: "con", prereqs: ["CON-4", "CON-7"], cost: 1500, chance: 0.02 },
-    "CON-9": { name: "Impression 3D en orbite", category: "con", prereqs: ["CON-7", "STR-7"], cost: 2000, chance: 0.015, rare: {lune: 2}, desc: "Construction sur place : une structure lourde ne coûte plus ×3 dans une zone où vous avez une mine" },
+    "CON-9": { name: "Impression 3D en orbite", category: "con", prereqs: ["CON-7", "STR-7"], cost: 2000, chance: 0.015, metals: 60, desc: "Construction sur place : une structure lourde ne coûte plus ×3 dans une zone où vous avez une mine" },
     "CON-10": { name: "Chantier orbital et usine spatiale", category: "con", prereqs: ["CON-9", "EXT-6"], cost: 4000, chance: 0.01 },
-    "CON-11": { name: "Ascenseur spatial", category: "con", prereqs: ["CON-10", "STR-8"], cost: 10000, chance: 0.005, rare: {lune: 4} },
+    "CON-11": { name: "Ascenseur spatial", category: "con", prereqs: ["CON-10", "STR-8"], cost: 10000, chance: 0.005, metals: 150, rare: {cristal: 3} },
     // Observation et détection
     "OBS-1": { name: "Télescope au sol", category: "obs", prereqs: [], cost: 20, chance: 0.15 },
     "OBS-2": { name: "Analyse de sol depuis le sol", category: "obs", prereqs: ["OBS-1", "REC-2"], cost: 80, chance: 0.09 },
@@ -472,10 +474,11 @@
   // "bonus") ; pour une recherche collective, c'est le chantier commun
   function toolingCost(p, t) {
     if (p.licences[t] || TECHS[t].pooled) return { money: 0, material: 0 };
-    return { money: Math.ceil(TECHS[t].cost * CONFIG.toolingRate), material: Math.ceil(TECHS[t].cost * CONFIG.toolingMetalRate) };
+    const equipment = Math.ceil((TECHS[t].metals || 0) * (1 - carbonDiscount(p)));
+    return { money: Math.ceil(TECHS[t].cost * CONFIG.toolingRate), material: Math.ceil(TECHS[t].cost * CONFIG.toolingMetalRate) + equipment };
   }
 
-  // remise "carbone" sur les coûts en régolithe / platinoïdes
+  // remise "carbone" sur les équipements en métaux et platinoïdes
   function carbonDiscount(p) {
     let d = 0;
     for (const t in CONFIG.carbonDiscount) if (hasTech(p, t)) d = Math.max(d, CONFIG.carbonDiscount[t]);
@@ -486,7 +489,7 @@
     const d = carbonDiscount(p);
     const out = {};
     for (const r in rares || {}) {
-      const n = r === "lune" || r === "cristal" ? Math.ceil(rares[r] * (1 - d)) : rares[r];
+      const n = r === "cristal" ? Math.ceil(rares[r] * (1 - d)) : rares[r];
       if (n > 0) out[r] = n;
     }
     return out;

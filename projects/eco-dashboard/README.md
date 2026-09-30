@@ -38,13 +38,13 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 
 | Mécanique | Implémentation |
 | --- | --- |
-| Ressources | Argent, **métaux** (fer, aluminium, titane implicites), 5 rares : Régolithe lunaire, Hélium-3, Platinoïdes, Glace d'eau, Ergols. Tout le monde démarre sur Terre avec les mêmes ressources. Le carbone n'est pas une ressource : il est partout, sa maîtrise passe par les technos. |
-| Zones | Terre, Orbite basse, Lune (régolithe + glace), Mars (glace, ergols sans glace par Sabatier), Mercure (métaux ×2, glace), Ceinture (platinoïdes, glace), Géante gazeuse (hélium-3), Comète (glace). Les planètes **extérieures** (Géante, Comète) survivent à l'explosion du Soleil. Accès : technos de la branche Extraction pour l'espace proche, de la Propulsion (PRO-5, PRO-6) pour l'extérieur. |
+| Ressources | Argent, **métaux** (fer, aluminium, titane implicites, y compris le régolithe lunaire, matériau de construction local), 4 rares : Hélium-3, Platinoïdes, Glace d'eau, Ergols. Tout le monde démarre sur Terre avec les mêmes ressources. Le carbone n'est pas une ressource : il est partout, sa maîtrise passe par les technos. |
+| Zones | Terre, Orbite basse, Lune (métaux ×1,5 grâce au régolithe, glace), Mars (glace, ergols sans glace par Sabatier), Mercure (métaux ×2, glace), Ceinture (platinoïdes, glace), Géante gazeuse (hélium-3), Comète (glace). Les planètes **extérieures** (Géante, Comète) survivent à l'explosion du Soleil. Accès : technos de la branche Extraction pour l'espace proche, de la Propulsion (PRO-5, PRO-6) pour l'extérieur. |
 | Construction | Coût × éloignement (×1 sur Terre → ×3 sur la Comète) + 1 ergol par niveau d'éloignement. Structures **lourdes** (réacteurs, chantier) : ×3 si lancées depuis la Terre, prix normal « sur place » avec CON-9 et une mine dans la zone. Chaque lancement depuis la Terre pollue une fois. |
 | Stations de ravitaillement | CON-5. Leur propriétaire construit dans la zone sans ergols ; les autres y achètent les ergols qui leur manquent au tarif qu'il fixe (dépendance, étranglement possible). |
 | Pollution | Seules les installations **sur Terre** polluent en continu ; régénération 12/tour. Démanteler est le seul moyen de faire baisser la pollution une fois l'industrie installée. Santé à 0 = défaite collective. |
-| Recherche | 87 technos, 10 branches. Coût = **outillage** payé une fois par techno (argent + métaux) + **chercheurs** : embauche 20 ₵, salaire 3 ₵/tour (même inactifs), 4 par laboratoire. **Expérience** : paliers à 2 et 4 tours sur la même recherche (contribution ×1,3 puis ×1,6), gardée d'une techno achevée à la suivante, perdue si on retire le chercheur d'une recherche en cours. **Licenciement** : 10 ₵ × (1 + palier). Chance par tour = 1 − (1 − p)^N (N pondéré par l'expérience), plafonnée à 95 %. Certaines technos exigent un équipement rare. |
-| Carbone | STR-4 composites → STR-8 nanomatériaux (−50 % sur les coûts en régolithe et platinoïdes) → STR-9 matière à interaction forte (science-fiction : plus besoin de ces rares, armadas +50 %). Les mines lointaines perdent de leur valeur en fin de partie. |
+| Recherche | 87 technos, 10 branches. Coût = **outillage** payé une fois par techno (argent + métaux) + **chercheurs** : embauche 20 ₵, salaire 3 ₵/tour (même inactifs), 4 par laboratoire. **Expérience** : paliers à 2 et 4 tours sur la même recherche (contribution ×1,3 puis ×1,6), gardée d'une techno achevée à la suivante, perdue si on retire le chercheur d'une recherche en cours. **Licenciement** : 10 ₵ × (1 + palier). Chance par tour = 1 − (1 − p)^N (N pondéré par l'expérience), plafonnée à 95 %. Certaines technos exigent un équipement en plus : des métaux (Structure, stations, impression 3D) ou une ressource rare. |
+| Carbone | STR-4 composites → STR-8 nanomatériaux (−50 % sur les équipements de recherche en métaux et platinoïdes) → STR-9 matière à interaction forte (science-fiction : plus besoin de ces équipements, armadas +50 %). Les mines lointaines perdent de leur valeur en fin de partie. |
 | Marché, troc, prêts, parts, rachat | Comme avant : prix fixés par chaque vendeur (rares, métaux, ravitaillement), troc avec licences et parts, prêts avec ou sans échéance, 100 parts par entreprise, rachat en faillite ou à 51 parts. |
 | Conflit opportuniste | Une infra placée après celle d'un autre dans la même zone risque de l'abîmer : 5 % prudent, 20 % agressif (÷2 avec STR-6). Pas de conflit sur Terre. |
 | Forêt sombre | Après « Première orbite ». Risque de lancement d'un **projectile** proportionnel à la **visibilité cumulée de toute la table** (seules les installations hors Terre se voient, d'autant plus qu'elles sont loin) ; ÷2 si une armada défend. Impact 32 tours après le lancement : Terre, Orbite, Lune, Mars, Mercure et Ceinture détruites. |
@@ -64,7 +64,7 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 | Question | Choix dans le POC | Où le changer |
 | --- | --- | --- |
 | Mars et Mercure | Zones distinctes (Mars : ergols sans glace ; Mercure : métaux ×2) | `ZONES` |
-| Matières modélisées | Une ressource « Métaux » (fer, alu, titane implicites) ; carbone via les technos | `RARES`, `MATERIAL` |
+| Matières modélisées | Une ressource « Métaux » (fer, alu, titane implicites, régolithe lunaire compris) ; carbone via les technos | `RARES`, `MATERIAL`, `ZONES` |
 | Cristaux | Deviennent les **Platinoïdes** de la Ceinture | `RARES` |
 | Fission | Surtout des constructions : réacteur lourd, bloqué par le coût de lancement plus que par le combustible | `INFRA.fission` |
 | Twist du carbone | Partiel (−50 %) avec STR-8, total avec STR-9 | `CONFIG.carbonDiscount` |
@@ -85,7 +85,8 @@ Sur 300 parties à stratégies tirées au hasard :
 - **Âges** : mid game vers le tour 32 ; late game dans 56 % des parties, vers le tour 150.
 - **Forêt sombre** : 176 projectiles lancés en 300 parties, 29 % déviés ; le Soleil explose dans 37 % des parties, et dans la moitié des cas au moins un joueur survit en s'étant replié.
 - **Coopération** : une table 100 % coopérative dévie bien plus souvent et ne perd presque jamais la planète par pollution. Une table mélangée échoue souvent parce que le savoir nécessaire est éparpillé chez des joueurs qui se replient.
-- **Ressource rare introuvable** : le régolithe n'est produit que sur la Lune. Tant que personne n'y va, toute la branche Structure avancée reste bloquée. Cette dépendance est intéressante à observer en partie humaine.
+- **Ressource rare introuvable** : les platinoïdes ne viennent que de la Ceinture ; tant que personne n'y va, l'électronique avancée reste bloquée. Cette dépendance est intéressante à observer en partie humaine.
+- **Régolithe fondu dans les métaux** : les technos de Structure coûtent désormais des métaux en plus ; sur une table coopérative, la part de projectiles déviés passe d'environ 33 % à 24 % (course à PRO-7 un peu plus lente).
 - **Prêts** : le mauvais payeur reste rentable, faute de mémoire des défauts chez les prêteurs.
 
 ## Fichiers
