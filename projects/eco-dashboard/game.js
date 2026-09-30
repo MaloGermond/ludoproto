@@ -38,10 +38,14 @@
     { id: "orbite", name: "Orbite basse", tier: 1, inner: true, reachTech: "CON-1", yield: {}, metals: 0 },
     { id: "lune", name: "Lune", tier: 2, inner: true, reachTech: "EXT-3", yield: { glace: 1 }, metals: 1.5 }, // régolithe : silicium, aluminium, titane
     { id: "mars", name: "Mars", tier: 3, inner: true, reachTech: "EXT-5", yield: { glace: 2 }, metals: 1, sabatier: true },
+    { id: "venus", name: "Vénus", tier: 3, inner: true, reachTech: "EXT-5", yield: { glace: 1 }, metals: 2 },
     { id: "mercure", name: "Mercure", tier: 3, inner: true, reachTech: "EXT-5", yield: { glace: 1 }, metals: 2 },
     { id: "ceinture", name: "Ceinture d'astéroïdes", tier: 4, inner: true, reachTech: "EXT-6", yield: { cristal: 2, glace: 1 }, metals: 1.5 },
-    { id: "geante", name: "Géante gazeuse", tier: 5, inner: false, reachTech: "PRO-5", yield: { he3: 2 }, metals: 0 },
-    { id: "comete", name: "Comète", tier: 6, inner: false, reachTech: "PRO-6", yield: { glace: 3 }, metals: 0 },
+    { id: "jupiter", name: "Jupiter", tier: 5, inner: false, reachTech: "PRO-5", yield: { he3: 2 }, metals: 1 }, // lunes glacées/rocheuses : minerai encore accessible après destruction du Soleil
+    { id: "saturne", name: "Saturne", tier: 6, inner: false, reachTech: "PRO-6", yield: { he3: 1, glace: 1 }, metals: 1 },
+    { id: "uranus", name: "Uranus", tier: 7, inner: false, reachTech: "PRO-7", yield: { cristal: 1 }, metals: 0.5 },
+    { id: "neptune", name: "Neptune", tier: 8, inner: false, reachTech: "PRO-8", yield: { he3: 1, glace: 2 }, metals: 0.5 },
+    { id: "comete", name: "Comète", tier: 9, inner: false, reachTech: "PRO-8", yield: { glace: 3 }, metals: 0 },
   ];
 
   const CONFIG = {
