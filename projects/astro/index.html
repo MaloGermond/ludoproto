@@ -19,7 +19,7 @@
     [hidden] {
       display: none !important;
     }
-    button {
+    button, select, input[type="number"] {
       font: inherit;
       font-size: 13px;
       color: #fff;
@@ -27,6 +27,11 @@
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 6px;
       padding: 6px 10px;
+    }
+    select option {
+      background: #10152a;
+    }
+    button {
       cursor: pointer;
     }
     button:hover:not(:disabled) {
@@ -40,91 +45,137 @@
       background: rgba(130, 255, 170, 0.25);
       border-color: rgba(130, 255, 170, 0.6);
     }
-    #toolbar {
+    button.active {
+      background: rgba(110, 190, 255, 0.3);
+      border-color: rgba(110, 190, 255, 0.7);
+    }
+    #side {
       position: fixed;
       top: 16px;
       right: 16px;
+      width: 300px;
       display: flex;
+      flex-direction: column;
+      align-items: stretch;
       gap: 8px;
     }
-    #node-panel {
-      position: fixed;
-      top: 60px;
-      right: 16px;
-      width: 280px;
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .panel {
       padding: 12px;
       background: rgba(10, 14, 28, 0.9);
       border: 1px solid rgba(255, 255, 255, 0.2);
       border-radius: 8px;
       font-size: 13px;
     }
-    #node-panel .panel-head {
+    .panel .panel-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 8px;
     }
-    #node-panel label {
+    .panel label {
       display: block;
       margin-top: 10px;
     }
-    #node-panel output {
+    .panel output {
       float: right;
       font-variant-numeric: tabular-nums;
     }
-    #node-panel input[type="range"] {
+    .panel input[type="range"] {
       width: 100%;
       margin: 4px 0 0;
     }
-    #node-panel .presets {
+    .panel .row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .panel .row > select {
+      flex: 1;
+    }
+    .panel .row > input[type="number"] {
+      width: 80px;
+    }
+    .panel .presets {
       display: flex;
       gap: 4px;
       margin-top: 6px;
     }
-    #node-panel .presets button {
+    .panel .presets button {
       flex: 1;
       padding: 4px 0;
       font-size: 12px;
     }
-    #node-info {
+    .panel .info {
       margin: 10px 0 0;
       color: rgba(255, 255, 255, 0.75);
       line-height: 1.5;
       white-space: pre-line;
     }
+    .panel .info.error {
+      color: #ff9a8a;
+    }
   </style>
 </head>
 <body>
-  <div id="toolbar">
-    <button id="btn-plan" type="button">⏸ Planifier</button>
-    <button id="btn-clear" type="button" hidden>Effacer le plan</button>
-    <button id="btn-launch" class="primary" type="button" hidden>▶ Lancer le plan</button>
-  </div>
+  <div id="side">
+    <div class="toolbar">
+      <button id="btn-warp-down" type="button" title="Ralentir le temps [,]">⏪</button>
+      <button id="btn-warp" type="button" title="Revenir au temps réel">×1</button>
+      <button id="btn-warp-up" type="button" title="Accélérer le temps [.]">⏩</button>
+      <button id="btn-camera" type="button" title="Caméra libre [C]">🎥 Caméra libre</button>
+      <button id="btn-plan" type="button">⏸ Planifier</button>
+    </div>
+    <div class="toolbar">
+      <button id="btn-circularize" type="button" hidden>○ Orbite circulaire</button>
+      <button id="btn-land" type="button" hidden title="Se poser sur l'astre où se termine le plan">⬇ Atterrir</button>
+      <button id="btn-clear" type="button" hidden>Effacer le plan</button>
+      <button id="btn-launch" class="primary" type="button" hidden>▶ Lancer le plan</button>
+    </div>
 
-  <div id="node-panel" hidden>
-    <div class="panel-head">
-      <strong id="node-title">Manœuvre</strong>
-      <button id="btn-delete" type="button">Supprimer</button>
+    <div id="target-panel" class="panel" hidden>
+      <strong>Destination</strong>
+      <div class="row">
+        <select id="in-target"></select>
+        <input id="in-altitude" type="number" min="10" step="10" value="150" title="Altitude de l'orbite visée" />
+      </div>
+      <div class="row">
+        <button id="btn-route" class="primary" type="button">🎯 Tracer la route</button>
+      </div>
+      <p id="route-info" class="info"></p>
     </div>
-    <label>Départ <output id="out-time"></output>
-      <input id="in-time" type="range" min="0" max="300" step="0.1" />
-    </label>
-    <label>Cap par rapport au prograde <output id="out-heading"></output>
-      <input id="in-heading" type="range" min="-180" max="180" step="1" />
-    </label>
-    <div class="presets">
-      <button type="button" data-heading="0">Prograde</button>
-      <button type="button" data-heading="180">Rétrograde</button>
-      <button type="button" data-heading="-90">−90°</button>
-      <button type="button" data-heading="90">+90°</button>
+
+    <div id="node-panel" class="panel" hidden>
+      <div class="panel-head">
+        <strong id="node-title">Manœuvre</strong>
+        <button id="btn-delete" type="button">Supprimer</button>
+      </div>
+      <label>Départ <output id="out-time"></output>
+        <input id="in-time" type="range" min="0" max="300" step="0.1" />
+      </label>
+      <label>Cap par rapport au prograde <output id="out-heading"></output>
+        <input id="in-heading" type="range" min="-180" max="180" step="1" />
+      </label>
+      <div class="presets">
+        <button type="button" data-heading="0">Prograde</button>
+        <button type="button" data-heading="180">Rétrograde</button>
+        <button type="button" data-heading="-90">−90°</button>
+        <button type="button" data-heading="90">+90°</button>
+      </div>
+      <label>Puissance <output id="out-power"></output>
+        <input id="in-power" type="range" min="0" max="100" step="1" />
+      </label>
+      <label>Durée de poussée <output id="out-duration"></output>
+        <input id="in-duration" type="range" min="0" max="20" step="0.05" />
+      </label>
+      <p id="node-info" class="info"></p>
     </div>
-    <label>Puissance <output id="out-power"></output>
-      <input id="in-power" type="range" min="0" max="100" step="1" />
-    </label>
-    <label>Durée de poussée <output id="out-duration"></output>
-      <input id="in-duration" type="range" min="0" max="20" step="0.1" />
-    </label>
-    <p id="node-info"></p>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/p5@1.9.3/lib/p5.min.js"></script>
