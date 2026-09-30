@@ -265,6 +265,7 @@
   const MILESTONES = [
     { id: "liftoff", name: "Première fusée qui décolle", need: ["PRO-1"] },
     { id: "altitude", name: "Record d'altitude", need: ["PRO-2", "STR-2", "GUI-2"] },
+    { id: "reentry", name: "Retour depuis l'espace", need: ["PRO-2", "STR-2", "GUI-2", "SUP-1"] },
     { id: "orbit", name: "Première orbite", need: ["PRO-3", "STR-3", "GUI-4"] },
     { id: "satellite", name: "Premier satellite", need: ["PRO-3", "STR-3", "GUI-4", "CON-4"] },
     { id: "human", name: "Premier humain en orbite", need: ["PRO-3", "STR-3", "GUI-4", "SUP-1", "SUP-2", "ENT-1"] },
@@ -278,12 +279,17 @@
   // derrière une longue chaîne de prérequis déterministe : on compose un
   // vaisseau avec ses connaissances (entraînement ENT) et son matériel
   // (métaux + argent au-delà du coût plancher), et on tente le lancement.
-  // Un échec consomme quand même les ressources engagées.
+  // Un échec consomme quand même les ressources engagées. Ladder : il faut
+  // avoir réussi le niveau précédent (prereqMission) avant de tenter le
+  // suivant — atteindre l'espace, puis y aller et revenir vivant, avant
+  // d'espérer l'orbite.
   const MISSIONS = [
-    { id: "orbit", name: "Mise en orbite", minTech: "PRO-1", baseChance: 0.25, moneyCost: 120, materialCost: 40 },
-    { id: "satellite", name: "Lancement d'un satellite", minTech: "PRO-1", baseChance: 0.3, moneyCost: 100, materialCost: 30 },
-    { id: "human", name: "Vol habité", minTech: "PRO-1", baseChance: 0.15, moneyCost: 200, materialCost: 60 },
-    { id: "samples", name: "Retour d'échantillons d'un autre astre", minTech: "PRO-1", baseChance: 0.2, moneyCost: 150, materialCost: 50 },
+    { id: "altitude", name: "Atteindre l'espace", minTech: "PRO-1", baseChance: 0.4, moneyCost: 60, materialCost: 20 },
+    { id: "reentry", name: "Atteindre l'espace et revenir vivant", minTech: "PRO-1", prereqMission: "altitude", baseChance: 0.3, moneyCost: 90, materialCost: 30 },
+    { id: "orbit", name: "Mise en orbite", minTech: "PRO-1", prereqMission: "reentry", baseChance: 0.25, moneyCost: 120, materialCost: 40 },
+    { id: "satellite", name: "Lancement d'un satellite", minTech: "PRO-1", prereqMission: "reentry", baseChance: 0.3, moneyCost: 100, materialCost: 30 },
+    { id: "human", name: "Vol habité", minTech: "PRO-1", prereqMission: "orbit", baseChance: 0.15, moneyCost: 200, materialCost: 60 },
+    { id: "samples", name: "Retour d'échantillons d'un autre astre", minTech: "PRO-1", prereqMission: "orbit", baseChance: 0.2, moneyCost: 150, materialCost: 50 },
   ];
 
   // trois âges : early (atteindre l'espace, la pollution menace), mid
@@ -712,6 +718,7 @@
     if (!m) return fail("Mission inconnue");
     if (p.milestones.includes(missionId)) return fail("Jalon déjà atteint");
     if (m.minTech && !hasTech(p, m.minTech)) return fail(`Nécessite ${TECHS[m.minTech].name}`);
+    if (m.prereqMission && !p.milestones.includes(m.prereqMission)) return fail(`Nécessite d'abord : ${MILESTONES.find((x) => x.id === m.prereqMission).name}`);
     money = Math.max(m.moneyCost, Math.floor(+money || 0));
     material = Math.max(m.materialCost, Math.floor(+material || 0));
     if (p.money < money) return fail(`Il faut ${money} ₵`);

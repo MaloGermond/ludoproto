@@ -230,17 +230,25 @@ function renderActions() {
   // (échec = ressources perdues)
   const fmi = $("#f-mission");
   const missionsAvailable = MISSIONS.filter((m) => !me.milestones.includes(m.id));
-  fillSelect(fmi.mission, missionsAvailable.map((m) => [m.id, `${m.name} — ${m.moneyCost} ₵ + ${m.materialCost} mét. mini`]));
+  fillSelect(
+    fmi.mission,
+    missionsAvailable.map((m) => {
+      const prereqLocked = m.prereqMission && !me.milestones.includes(m.prereqMission);
+      return [m.id, `${m.name} — ${m.moneyCost} ₵ + ${m.materialCost} mét. mini${prereqLocked ? ` 🔒 ${MILESTONES.find((x) => x.id === m.prereqMission).name}` : ""}`];
+    })
+  );
   const selMission = MISSIONS.find((m) => m.id === fmi.mission.value);
   if (!selMission) {
     $("[data-hint=mission]").textContent = missionsAvailable.length ? "" : "Tous les jalons éligibles sont déjà atteints";
   } else {
-    const locked = selMission.minTech && !Game.hasTech(me, selMission.minTech);
+    const lockedTech = selMission.minTech && !Game.hasTech(me, selMission.minTech);
+    const lockedPrereq = selMission.prereqMission && !me.milestones.includes(selMission.prereqMission);
     const money = Math.max(selMission.moneyCost, +fmi.money.value || selMission.moneyCost);
     const material = Math.max(selMission.materialCost, +fmi.material.value || selMission.materialCost);
     const chance = Game.missionChance(me, selMission, money, material);
     $("[data-hint=mission]").textContent = [
-      locked ? `⚠ nécessite ${TECHS[selMission.minTech].name}` : "",
+      lockedTech ? `⚠ nécessite ${TECHS[selMission.minTech].name}` : "",
+      lockedPrereq ? `⚠ nécessite d'abord : ${MILESTONES.find((x) => x.id === selMission.prereqMission).name}` : "",
       `entraînement équipage ${Math.round(Game.crewTraining(me) * 100)} %`,
       `chance de réussite : ${Math.round(chance * 100)} % (${money} ₵ + ${material} ${MATERIAL.toLowerCase()} engagés, tout perdu en cas d'échec)`,
     ]
