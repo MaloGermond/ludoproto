@@ -15,7 +15,7 @@ const causes = {};
 const byStrategy = {};
 const loanStatus = {};
 const ages = { mid: [], late: [] };
-const threat = { projectiles: 0, deviations: 0, impacts: 0, survivedImpact: 0, invaderWaves: 0, cloaked: 0 };
+const threat = { projectiles: 0, deviations: 0, impacts: 0, survivedImpact: 0, fleets: 0, cloaked: 0 };
 const projects = { lancés: 0, achevés: 0, promessesNonTenues: 0 };
 let incidents = 0;
 let voluntary = 0;
@@ -34,7 +34,7 @@ for (let seed = 1; seed <= games; seed++) {
 
   endings[s.ended.type] = (endings[s.ended.type] || 0) + 1;
   if (s.ended.type === "collective") {
-    const cause = s.sunDestroyed ? "explosion du Soleil" : "planète polluée";
+    const cause = !s.sunDestroyed && s.planet <= 0 ? "planète polluée" : "anéantis par la forêt sombre";
     causes[cause] = (causes[cause] || 0) + 1;
   }
   for (const a of ["mid", "late"]) if (s.ageTurns[a]) ages[a].push(s.ageTurns[a]);
@@ -42,7 +42,7 @@ for (let seed = 1; seed <= games; seed++) {
   threat.deviations += s.deviations;
   threat.impacts += s.sunDestroyed ? 1 : 0;
   threat.survivedImpact += s.sunDestroyed && G.activePlayers(s).length ? 1 : 0;
-  threat.invaderWaves += s.invaderWaves;
+  threat.fleets += s.fleets;
   threat.cloaked += s.darkForestCloaked ? 1 : 0;
   projects.lancés += s.projects.length;
   projects.achevés += s.projects.filter((p) => p.status === "achevé").length;

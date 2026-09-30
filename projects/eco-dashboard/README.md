@@ -23,7 +23,7 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
   automatique (sélecteur sur sa carte). On peut mélanger, et changer en cours de partie.
 - « Agir en tant que » (ou clic sur une carte) choisit qui agit : c'est du hot-seat.
 - **Fin du tour** : les stratégies jouent, puis production, recherche, jalons et âges,
-  incidents, échéances des prêts, pollution, forêt sombre, envahisseurs, faillites, fins.
+  incidents, échéances des prêts, pollution, forêt sombre, faillites, fins.
 - La graine rend une partie reproductible : même graine + mêmes actions = même partie.
 
 ## Trois âges
@@ -32,7 +32,7 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 | --- | --- | --- | --- | --- |
 | **Early** | début | Terre | Ergols d'hydrocarbures (raffinerie, très polluante) | Pollution : défaite collective |
 | **Mid** | jalon « Première orbite » | Orbite basse, Lune, Mars, Mercure, Ceinture | Ergols de glace (usine d'ergols), fission | Forêt sombre |
-| **Late** | fusion (PRO-8) ou extraction sur une planète extérieure | Géante gazeuse, Comète | Fusion (hélium-3) | Envahisseurs, armadas, tensions |
+| **Late** | fusion (PRO-8) ou extraction sur une planète extérieure | Géante gazeuse, Comète | Fusion (hélium-3) | Flottes de la forêt sombre, armadas, tensions |
 
 ## Règles (chiffres approximatifs, cf. `CONFIG` dans `game.js`)
 
@@ -47,17 +47,18 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 | Carbone | STR-4 composites → STR-8 nanomatériaux (−50 % sur les équipements de recherche en métaux et platinoïdes) → STR-9 matière à interaction forte (science-fiction : plus besoin de ces équipements, armadas +50 %). Les mines lointaines perdent de leur valeur en fin de partie. |
 | Marché, troc, prêts, parts, rachat | Comme avant : prix fixés par chaque vendeur (rares, métaux, ravitaillement), troc avec licences et parts, prêts avec ou sans échéance, 100 parts par entreprise, rachat en faillite ou à 51 parts. |
 | Conflit opportuniste | Une infra placée après celle d'un autre dans la même zone risque de l'abîmer : 5 % prudent, 20 % agressif (÷2 avec STR-6). Pas de conflit sur Terre. |
-| Forêt sombre | Après « Première orbite ». Risque de lancement d'un **projectile** proportionnel à la **visibilité cumulée de toute la table** (seules les installations hors Terre se voient, d'autant plus qu'elles sont loin) ; ÷2 si une armada défend. Impact 32 tours après le lancement : Terre, Orbite, Lune, Mars, Mercure et Ceinture détruites. |
+| Forêt sombre | Après « Première orbite ». Risque de déclenchement proportionnel à la **visibilité cumulée de toute la table** (seules les installations hors Terre se voient, d'autant plus qu'elles sont loin) ; ÷2 si une armada défend. Elle ne fait **jamais gagner** : elle ne peut que faire perdre. **Première vague** : un projectile sur le Soleil, impact 32 tours après le lancement (Terre, Orbite, Lune, Mars, Mercure et Ceinture détruites). Après 40 tours de répit, elle peut **frapper à nouveau** : chaque vague suivante est une **flotte extraterrestre** très puissante (force 40, puis +20 par flotte ; une armada vaut 12), qui arrive 16 tours après et rase une zone occupée par tour pendant 6 tours, sauf chez les joueurs dont les armadas en défense l'égalent. |
 | Parade | **PRO-10, recherche collective** : les chercheurs de toute la table s'additionnent (chance de base 0,5 %/chercheur). Détenir un prérequis (PRO-7, OBS-5, REC-7) suffit pour participer, mais les participants doivent les réunir tous, et un **chantier de distorsion** (outillage commun) doit être achevé. Personne ne peut y arriver seul. Autre option : se **replier** sur les planètes extérieures (dilemme du prisonnier). COM-7 + OBS-8 = camouflage, plus aucune menace. |
-| Envahisseurs | Late game, seulement si la forêt sombre a repéré l'humanité : une vague tous les 16 tours, de plus en plus forte, rase une zone sauf chez les joueurs protégés par une armada en défense. |
-| Projets communs | Armada (nécessite un chantier orbital, CON-6), chantier de distorsion, méga-extracteur (EXT-6). Chacun verse ce qu'il veut ; **promesses** visibles mais non engageantes (trahison journalisée à l'achèvement) ; propriété au prorata des apports, **contrôle** au plus gros contributeur. Armada : **défense** (envahisseurs, forêt sombre), **conquête** (une attaque par tour sur un non-copropriétaire) ou **exploration** (avec PRO-10 chez un copropriétaire : fin galactique). |
+| Projets communs | Armada (nécessite un chantier orbital, CON-6), chantier de distorsion, méga-extracteur (EXT-6). Chacun verse ce qu'il veut ; **promesses** visibles mais non engageantes (trahison journalisée à l'achèvement) ; propriété au prorata des apports, **contrôle** au plus gros contributeur. Armada : **défense** (flottes de la forêt sombre, risque de déclenchement ÷2), **conquête** (une attaque par tour sur un non-copropriétaire) ou **exploration** (avec PRO-10 chez un copropriétaire : fin galactique). |
 
 ### Fins de partie
 
 - **Galactique** : un joueur maîtrise les 87 technos, ou une armada en exploration part avec la distorsion (gagnants : ses copropriétaires).
-- **Économique** / **Guerrière** : un seul joueur reste, les autres surtout rachetés / détruits par un joueur.
-- **Narrative** : survivre jusqu'au tour 400, ou être le seul survivant après le Soleil ou les envahisseurs.
+- **Économique** / **Guerrière** : un seul joueur reste, les autres surtout rachetés / détruits **par des joueurs**.
 - **Défaite collective** : planète polluée, ou personne n'a survécu.
+- **Sans vainqueur** : personne n'a gagné au tour 400.
+
+Il n'y a pas de victoire narrative : survivre à la forêt sombre ne fait pas gagner. Si elle élimine tous les joueurs sauf un, la partie continue, et c'est au survivant de reconstruire sa civilisation : il ne peut plus gagner que par la voie galactique.
 
 ## Arbitrages sur les questions ouvertes des documents
 
@@ -69,7 +70,7 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 | Fission | Surtout des constructions : réacteur lourd, bloqué par le coût de lancement plus que par le combustible | `INFRA.fission` |
 | Twist du carbone | Partiel (−50 %) avec STR-8, total avec STR-9 | `CONFIG.carbonDiscount` |
 | Stations de ravitaillement | Bâtiments à part entière, avec droit de ravitaillement | `INFRA.station` |
-| Envahisseurs | Seulement si la forêt sombre a repéré l'humanité | `invaders()` |
+| Envahisseurs | Ce sont les vagues suivantes de la forêt sombre : des flottes extraterrestres, après le premier projectile | `fleetAttack()`, `CONFIG.fleet*` |
 | Qui déclenche la forêt sombre | Le cumul de la table (visibilité hors Terre) | `CONFIG.darkForestPerVis` |
 | Calibrer PRO-10 / hiérarchie | Hiérarchie revue : prérequis intermédiaires (PRO-7, OBS-5, REC-7) réunis à plusieurs, outillage commun | `TECHS["PRO-10"]`, `PROJECTS.distorsion` |
 | Matière à interaction forte | Menace **et** techno (STR-9) | `TECHS["STR-9"]` |
@@ -81,9 +82,9 @@ npm run check        # vérifie qu'aucune techno n'exige une rare inaccessible s
 
 Sur 300 parties à stratégies tirées au hasard :
 
-- **Fins** : 41 % de défaites écologiques, 16 % d'explosions du Soleil sans survivant, 29 % de fins narratives, 11 % économiques, 3 % galactiques.
+- **Fins** : 40 % de défaites écologiques, 15 % de tables anéanties par la forêt sombre, 29 % sans vainqueur, 11 % galactiques, 6 % économiques.
 - **Âges** : mid game vers le tour 32 ; late game dans 53 % des parties, vers le tour 156.
-- **Forêt sombre** : 158 projectiles lancés en 300 parties, 20 % déviés ; le Soleil explose dans 38 % des parties, et dans plus de la moitié des cas au moins un joueur survit en s'étant replié.
+- **Forêt sombre** : 165 projectiles en 300 parties, 22 % déviés ; le Soleil explose dans 41 % des parties, et dans 2 cas sur 3 au moins un joueur survit en s'étant replié. 64 flottes extraterrestres ont suivi. Dans 71 parties il ne reste qu'un survivant ; un seul d'entre eux finit par gagner (voie galactique).
 - **Coopération** : une table 100 % coopérative dévie bien plus souvent et ne perd presque jamais la planète par pollution. Une table mélangée échoue souvent parce que le savoir nécessaire est éparpillé chez des joueurs qui se replient.
 - **Ressource rare introuvable** : les platinoïdes ne viennent que de la Ceinture ; tant que personne n'y va, l'électronique avancée reste bloquée. Cette dépendance est intéressante à observer en partie humaine.
 - **Régolithe fondu dans les métaux** : les technos de Structure coûtent désormais des métaux en plus ; sur une table coopérative, la part de projectiles déviés passe d'environ 33 % à 24 % (course à PRO-7 un peu plus lente).

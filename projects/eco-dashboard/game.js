@@ -1,7 +1,8 @@
 // POC mécaniques socio-économiques — issue #12
 // Modèle de jeu pur (aucun DOM) : ressources, recherche, infrastructures,
 // marché, troc, prêts, parts d'entreprise, conflit opportuniste, projets
-// collaboratifs, forêt sombre, envahisseurs et conditions de fin.
+// collaboratifs, forêt sombre (projectile puis flottes extraterrestres) et
+// conditions de fin.
 // Les chiffres sont volontairement approximatifs (cf. CONFIG).
 //
 // Game design de référence : docs/materiaux-chaine.md (chaîne de matériaux
@@ -75,12 +76,13 @@
     darkForestPerVis: 0.0005, // risque de lancement d'un projectile par tour, par point de visibilité cumulée de la table
     darkForestMax: 0.1,
     projectileTurns: 32, // délai avant impact (8 ans)
-    projectileCooldown: 40, // tours de répit après une déviation
+    projectileCooldown: 40, // tours de répit après chaque vague de la forêt sombre
     distorsionBoost: 4, // chercheurs équivalents apportés par un chantier de distorsion
-    // envahisseurs (late game, seulement si la forêt sombre a été déclenchée)
-    invaderEvery: 16,
-    invaderBase: 10,
-    invaderGrowth: 6,
+    // vagues suivantes de la forêt sombre : flottes extraterrestres
+    fleetTurns: 16, // délai avant l'arrivée de la flotte
+    fleetStay: 6, // tours pendant lesquels elle ravage le système
+    fleetStrength: 40, // force de la première flotte (une armada vaut 12)
+    fleetGrowth: 20, // force en plus à chaque nouvelle flotte
     armadaStrength: 12,
     defaultRarePrice: 5,
     defaultMaterialPrice: 2,
@@ -115,7 +117,7 @@
       name: "Armada",
       cost: { money: 400, material: 300, rares: { he3: 4, ergols: 10 } },
       needsInfra: "chantier",
-      desc: "Flotte de fin de partie. Mode défense (envahisseurs, forêt sombre), conquête (attaquer un joueur) ou exploration (avec PRO-10 : départ vers d'autres galaxies).",
+      desc: "Flotte de fin de partie. Mode défense (flottes de la forêt sombre), conquête (attaquer un joueur) ou exploration (avec PRO-10 : départ vers d'autres galaxies).",
     },
     distorsion: {
       name: "Chantier de distorsion",
@@ -270,11 +272,11 @@
 
   // trois âges : early (atteindre l'espace, la pollution menace), mid
   // (planètes proches, la forêt sombre guette), late (fusion, planètes
-  // extérieures, armadas, envahisseurs)
+  // extérieures, armadas)
   const AGES = {
     early: { name: "Early — la course à l'espace", risk: "pollution" },
     mid: { name: "Mid — l'espace proche", risk: "forêt sombre" },
-    late: { name: "Late — fusion et armadas", risk: "envahisseurs et tensions" },
+    late: { name: "Late — fusion et armadas", risk: "flottes de la forêt sombre et tensions" },
   };
 
   const NAMES = ["Aurora", "Borealis", "Cygnus", "Draco", "Eridan"];
@@ -660,7 +662,7 @@
       }
       if (m.id === "cloak" && !s.darkForestCloaked) {
         s.darkForestCloaked = true;
-        log(s, "forêt sombre", `${p.name} parvient à camoufler l'humanité — plus de projectile ni d'envahisseurs`, [p.id]);
+        log(s, "forêt sombre", `${p.name} parvient à camoufler l'humanité — plus de projectile ni de flotte`, [p.id]);
       }
     }
   }
@@ -1353,11 +1355,13 @@
     if (delta < -5) log(s, "planète", `Pollution ${total.toFixed(1)} — santé de la planète ${Math.round(s.planet)}`);
   }
 
-  // forêt sombre : risque de lancement d'un projectile proportionnel à la
-  // visibilité cumulée de toute la table (tout le monde est responsable),
-  // divisé par deux si une armada défend la table
+  // forêt sombre : risque de déclenchement proportionnel à la visibilité
+  // cumulée de toute la table (tout le monde est responsable), divisé par
+  // deux si une armada défend la table. Première vague : un projectile sur
+  // le Soleil ; vagues suivantes : des flottes extraterrestres. Elle ne fait
+  // jamais gagner personne, elle ne peut que faire perdre.
   function darkForestRisk(s) {
-    if (s.darkForestCloaked || s.darkForestTriggerTurn == null || s.projectile || s.sunDestroyed) return 0;
+    if (s.darkForestCloaked || s.darkForestTriggerTurn == null || s.projectile || s.fleet) return 0;
     if (s.turn < s.projectileCooldownUntil) return 0;
     const defended = s.projects.some((pr) => pr.type === "armada" && pr.status === "achevé" && pr.mode === "défense");
     return Math.min(CONFIG.darkForestMax, CONFIG.darkForestPerVis * tableVisibility(s)) * (defended ? 0.5 : 1);
@@ -1379,17 +1383,59 @@
       if (left % 4 === 0) log(s, "forêt sombre", `Projectile : impact sur le Soleil dans ${left} tours`);
       return;
     }
+    if (s.fleet) return fleetAttack(s);
     const risk = darkForestRisk(s);
     if (!risk || rand(s) >= risk) return;
-    s.projectile = { launched: s.turn, arrival: s.turn + CONFIG.projectileTurns };
-    s.projectiles++;
-    log(s, "forêt sombre", `Un bloc de matière à interaction forte fonce vers le Soleil ! Impact au tour ${s.projectile.arrival}. Seule la distorsion (PRO-10) peut le dévier — ou se replier sur les planètes extérieures.`);
+    if (!s.projectiles) {
+      s.projectile = { launched: s.turn, arrival: s.turn + CONFIG.projectileTurns };
+      s.projectiles++;
+      log(s, "forêt sombre", `Un bloc de matière à interaction forte fonce vers le Soleil ! Impact au tour ${s.projectile.arrival}. Seule la distorsion (PRO-10) peut le dévier — ou se replier sur les planètes extérieures.`);
+      return;
+    }
+    const strength = CONFIG.fleetStrength + CONFIG.fleetGrowth * s.fleets;
+    s.fleets++;
+    s.fleet = { strength, arrival: s.turn + CONFIG.fleetTurns, leaves: s.turn + CONFIG.fleetTurns + CONFIG.fleetStay };
+    log(s, "forêt sombre", `La forêt sombre frappe à nouveau : une flotte extraterrestre (force ${strength}) arrive au tour ${s.fleet.arrival}. Seules des armadas en défense peuvent lui résister.`);
+  }
+
+  // flotte extraterrestre : chaque tour de sa présence, elle rase une zone
+  // occupée, sauf chez les joueurs dont les armadas en défense l'égalent
+  function fleetAttack(s) {
+    const f = s.fleet;
+    if (s.turn < f.arrival) {
+      const left = f.arrival - s.turn;
+      if (left % 4 === 0) log(s, "forêt sombre", `Flotte extraterrestre (force ${f.strength}) : arrivée dans ${left} tours`);
+      return;
+    }
+    const zones = ZONES.filter((z) => zoneOpen(s, z) && activePlayers(s).some((p) => p.infras.some((i) => i.zone === z.id)));
+    if (zones.length) {
+      const z = zones[Math.floor(rand(s) * zones.length)];
+      log(s, "forêt sombre", `La flotte extraterrestre (force ${f.strength}) ravage ${z.name}`);
+      for (const p of activePlayers(s)) {
+        const here = p.infras.filter((i) => i.zone === z.id);
+        if (!here.length) continue;
+        const def = defenseOf(s, p);
+        if (def >= f.strength) {
+          log(s, "forêt sombre", `${p.name} repousse la flotte grâce à ses armadas (défense ${def})`, [p.id]);
+          continue;
+        }
+        p.infras = p.infras.filter((i) => i.zone !== z.id);
+        log(s, "forêt sombre", `${p.name} perd ${here.length} infrastructure(s) en ${z.name}${def ? ` (défense ${def}, insuffisante)` : ""}`, [p.id]);
+        if (!p.infras.length) eliminate(s, p, null, "anéanti par la flotte extraterrestre");
+      }
+    }
+    if (s.turn >= f.leaves) {
+      s.fleet = null;
+      s.projectileCooldownUntil = s.turn + CONFIG.projectileCooldown;
+      log(s, "forêt sombre", "La flotte extraterrestre quitte le système.");
+    }
   }
 
   // le Soleil explose : toutes les zones intérieures sont détruites
   function impact(s) {
     s.projectile = null;
     s.sunDestroyed = true;
+    s.projectileCooldownUntil = s.turn + CONFIG.projectileCooldown;
     log(s, "forêt sombre", "💥 Le projectile frappe le Soleil. Terre, Orbite basse, Lune, Mars, Mercure et Ceinture sont détruites.");
     for (const p of activePlayers(s)) {
       const lost = p.infras.filter((i) => zone(i.zone).inner);
@@ -1401,33 +1447,6 @@
         const cap = labCapacity(p);
         if (p.staff.length > cap) p.staff = p.staff.slice(0, cap);
       }
-    }
-  }
-
-  // envahisseurs : vagues de fin de partie, seulement si la forêt sombre a
-  // déjà repéré l'humanité (et qu'elle ne s'est pas camouflée)
-  function invaders(s) {
-    if (s.age !== "late" || s.darkForestTriggerTurn == null || s.darkForestCloaked) return;
-    if (s.invaderNext == null) s.invaderNext = s.turn + CONFIG.invaderEvery;
-    if (s.turn < s.invaderNext) return;
-    s.invaderNext = s.turn + CONFIG.invaderEvery;
-    const strength = CONFIG.invaderBase + CONFIG.invaderGrowth * s.invaderWaves;
-    s.invaderWaves++;
-    const zones = ZONES.filter((z) => zoneOpen(s, z) && activePlayers(s).some((p) => p.infras.some((i) => i.zone === z.id)));
-    if (!zones.length) return;
-    const z = zones[Math.floor(rand(s) * zones.length)];
-    log(s, "envahisseurs", `Une flotte extraterrestre (force ${strength}) attaque ${z.name}`);
-    for (const p of activePlayers(s)) {
-      const here = p.infras.filter((i) => i.zone === z.id);
-      if (!here.length) continue;
-      const def = defenseOf(s, p);
-      if (def >= strength) {
-        log(s, "envahisseurs", `${p.name} repousse l'assaut grâce à son armada (défense ${def})`, [p.id]);
-        continue;
-      }
-      p.infras = p.infras.filter((i) => i.zone !== z.id);
-      log(s, "envahisseurs", `${p.name} perd ${here.length} infrastructure(s) en ${z.name}`, [p.id]);
-      if (!p.infras.length) eliminate(s, p, null, "anéanti par les envahisseurs");
     }
   }
 
@@ -1494,22 +1513,20 @@
       const others = s.players.filter((p) => p !== w);
       const bought = others.filter((p) => p.status === "racheté").length;
       const killed = others.filter((p) => p.status === "détruit" && p.endedBy != null).length;
-      const nature = others.length - bought - killed; // Soleil, envahisseurs
-      if (nature > bought && nature > killed) {
-        s.ended = { type: "narrative", text: `Victoire narrative : ${w.name} est le seul à avoir survécu à la forêt sombre.`, winners: [w.id] };
+      const nature = others.length - bought - killed; // Soleil, flottes : la forêt sombre ne fait gagner personne
+      if (nature >= bought + killed) {
+        // la partie continue : au survivant de reconstruire sa civilisation
+        if (!s.loneSurvivor) {
+          s.loneSurvivor = w.id;
+          log(s, "forêt sombre", `${w.name} est le dernier survivant : à lui de reconstruire sa civilisation (il ne peut plus gagner que par la voie galactique).`, [w.id]);
+        }
       } else {
         const type = bought >= killed ? "économique" : "guerrière";
         s.ended = { type, text: `Victoire ${type} de ${w.name}.`, winners: [w.id] };
       }
-    } else if (s.turn >= CONFIG.maxTurns) {
-      const how = s.darkForestCloaked
-        ? " L'humanité a même réussi à se camoufler."
-        : s.sunDestroyed
-          ? " Ils se sont repliés sur les planètes extérieures."
-          : s.deviations
-            ? ` La distorsion a dévié ${s.deviations} projectile(s).`
-            : "";
-      s.ended = { type: "narrative", text: `Victoire narrative : ${alive.map((p) => p.name).join(", ")} ont survécu à la forêt sombre.${how}`, winners: alive.map((p) => p.id) };
+    }
+    if (!s.ended && s.turn >= CONFIG.maxTurns) {
+      s.ended = { type: "sans vainqueur", text: `Fin de partie au tour ${CONFIG.maxTurns} sans vainqueur. Encore en jeu : ${alive.map((p) => p.name).join(", ")}.`, winners: [] };
     }
     if (s.ended) log(s, "fin", s.ended.text, s.ended.winners);
     return s.ended;
@@ -1545,8 +1562,9 @@
       projectiles: 0,
       deviations: 0,
       sunDestroyed: false,
-      invaderNext: null,
-      invaderWaves: 0,
+      fleet: null, // { strength, arrival, leaves } : flotte extraterrestre en approche ou présente
+      fleets: 0,
+      loneSurvivor: null,
       players: [],
       offers: [],
       loans: [],
@@ -1628,7 +1646,6 @@
     loansDue(s);
     pollution(s);
     darkForest(s);
-    invaders(s);
     solvency(s);
     expireOffers(s);
     snapshot(s);

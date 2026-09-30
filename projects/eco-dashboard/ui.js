@@ -93,10 +93,10 @@ function renderStatus() {
 
 function forestLabel() {
   if (S.darkForestCloaked) return `<span class="good">camouflage galactique</span>`;
-  if (S.sunDestroyed) return `<span class="bad">le Soleil a explosé</span>`;
   if (S.projectile) return `<strong class="bad">projectile : impact dans ${S.projectile.arrival - S.turn} tours</strong>`;
+  if (S.fleet) return `<strong class="bad">flotte extraterrestre (force ${S.fleet.strength}) ${S.turn < S.fleet.arrival ? `dans ${S.fleet.arrival - S.turn} tours` : "dans le système"}</strong>`;
   if (S.darkForestTriggerTurn == null) return `<span class="muted">pas encore visible (jalon : ${MILESTONES.find((m) => m.id === CONFIG.darkForestTrigger).name})</span>`;
-  return `<strong class="warn">${(Game.darkForestRisk(S) * 100).toFixed(1)} %/tour</strong> <span class="muted">(visibilité de la table ${fmt(Game.tableVisibility(S))})</span>`;
+  return `${S.sunDestroyed ? `<span class="bad">Soleil détruit</span> · ` : ""}<strong class="warn">${(Game.darkForestRisk(S) * 100).toFixed(1)} %/tour</strong> <span class="muted">(visibilité de la table ${fmt(Game.tableVisibility(S))})</span>`;
 }
 
 function sparkline(id) {
@@ -472,12 +472,16 @@ function bindActions() {
 function renderThreats() {
   const k = Game.pooledKnowledge(S, "PRO-10");
   const deflector = S.players.find((p) => Game.hasTech(p, "PRO-10"));
-  const invaders =
-    S.age === "late" && S.darkForestTriggerTurn != null && !S.darkForestCloaked
-      ? `vague ${S.invaderWaves + 1} (force ${CONFIG.invaderBase + CONFIG.invaderGrowth * S.invaderWaves})${S.invaderNext != null ? ` au tour ${S.invaderNext}` : ""}`
-      : S.age === "late"
-        ? "aucun (humanité jamais repérée, ou camouflée)"
-        : "late game seulement";
+  const nextFleet = CONFIG.fleetStrength + CONFIG.fleetGrowth * S.fleets;
+  const fleets = S.fleet
+    ? `<strong class="bad">force ${S.fleet.strength}, ${S.turn < S.fleet.arrival ? `arrive au tour ${S.fleet.arrival}` : `ravage le système jusqu'au tour ${S.fleet.leaves}`}</strong>`
+    : S.projectiles
+      ? `prochaine vague de la forêt sombre : une flotte de force ${nextFleet}${S.fleets ? ` (${S.fleets} déjà venue(s))` : ""}`
+      : `<span class="muted">après le premier projectile</span>`;
+  const defense = S.players
+    .filter(Game.isActive)
+    .map((p) => `${p.name} ${Game.defenseOf(S, p)}`)
+    .join(" · ");
   const ages = Object.keys(AGES).map((a) => `${S.ageTurns[a] ? `<strong>${AGES[a].name}</strong> dès T${S.ageTurns[a]}` : `<span class="muted">${AGES[a].name}</span>`}`).join(" → ");
   $("#threats").innerHTML = `
     <p>${ages}</p>
@@ -490,7 +494,7 @@ function renderThreats() {
               k.missing.length ? `<span class="warn">il manque ${k.missing.map((r) => TECHS[r].name).join(", ")}</span>` : "savoir réuni"
             } · ${k.tooled ? "chantier de distorsion achevé" : `<span class="warn">pas de chantier de distorsion</span>`} · <strong>${Math.round(k.chance * 100)} %/tour</strong>`
       }</td></tr>
-      <tr><th>Envahisseurs</th><td>${invaders}</td></tr>
+      <tr><th>Flottes extraterrestres</th><td>${fleets} · défense des joueurs (armadas) : ${defense}</td></tr>
       <tr><th>Repli possible</th><td>${
         S.players
           .filter(Game.isActive)
