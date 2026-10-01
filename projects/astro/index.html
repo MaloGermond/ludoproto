@@ -65,6 +65,9 @@
       justify-content: flex-end;
       gap: 6px;
     }
+    .toolbar input[type="number"] {
+      width: 64px;
+    }
     .panel {
       padding: 12px;
       background: rgba(10, 14, 28, 0.9);
@@ -134,7 +137,8 @@
     </div>
     <div class="toolbar">
       <button id="btn-circularize" type="button" hidden>○ Orbite circulaire</button>
-      <button id="btn-land" type="button" hidden title="Se poser sur l'astre où se termine le plan">⬇ Atterrir</button>
+      <input id="in-land-angle" type="number" min="0" max="359" step="1" placeholder="angle °" title="Point de la surface visé (0-359°) — vide = n'importe où le long de l'orbite actuelle" hidden />
+      <button id="btn-land" type="button" hidden title="Se poser sur l'astre où se termine le plan, au point visé si un angle est précisé">⬇ Atterrir</button>
       <button id="btn-clear" type="button" hidden>Effacer le plan</button>
       <button id="btn-launch" class="primary" type="button" hidden>▶ Lancer le plan</button>
     </div>
