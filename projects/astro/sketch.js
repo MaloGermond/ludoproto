@@ -117,10 +117,10 @@ const PHASE_STYLES = {
 const BODY_CONFIGS = [
   { id: "sun", name: "Soleil", parent: null, radius: 900, mass: 40000, color: [255, 210, 90] },
   { id: "mercury", name: "Mercure", parent: "sun", orbitRadius: 3500, phase: 200, radius: 50, mass: 35, color: [180, 170, 160] },
-  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 750, color: [230, 200, 140], atmosphere: { height: 55, density: 2.2 } },
-  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200], atmosphere: { height: 70, density: 1 } },
+  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 750, color: [230, 200, 140], atmosphere: { height: 55, density: 2.2, color: [235, 210, 150] } },
+  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200], atmosphere: { height: 70, density: 1, color: [150, 190, 255] } },
   { id: "moon", name: "Lune", parent: "earth", orbitRadius: 2200, phase: 60, radius: 60, mass: 22, color: [180, 180, 180] },
-  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 200, color: [210, 120, 80], atmosphere: { height: 40, density: 0.15 } },
+  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 200, color: [210, 120, 80], atmosphere: { height: 40, density: 0.15, color: [220, 160, 120] } },
   { id: "phobos", name: "Phobos", parent: "mars", orbitRadius: 500, phase: 30, radius: 15, mass: 1, color: [140, 130, 120] },
   { id: "deimos", name: "Déimos", parent: "mars", orbitRadius: 1000, phase: 210, radius: 12, mass: 1, color: [150, 140, 130] },
   { id: "jupiter", name: "Jupiter", parent: "sun", orbitRadius: 36000, phase: 250, radius: 500, mass: 3000, color: [220, 180, 140] },
@@ -129,7 +129,7 @@ const BODY_CONFIGS = [
   { id: "ganymede", name: "Ganymède", parent: "jupiter", orbitRadius: 6500, phase: 180, radius: 55, mass: 16, color: [160, 150, 140] },
   { id: "callisto", name: "Callisto", parent: "jupiter", orbitRadius: 10500, phase: 270, radius: 50, mass: 12, color: [120, 110, 100] },
   { id: "saturn", name: "Saturne", parent: "sun", orbitRadius: 68000, phase: 320, radius: 420, mass: 1500, color: [230, 210, 160] },
-  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 22, color: [220, 180, 110], atmosphere: { height: 35, density: 1.3 } },
+  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 22, color: [220, 180, 110], atmosphere: { height: 35, density: 1.3, color: [210, 160, 90] } },
   { id: "uranus", name: "Uranus", parent: "sun", orbitRadius: 108000, phase: 30, radius: 260, mass: 600, color: [160, 220, 230] },
   { id: "titania", name: "Titania", parent: "uranus", orbitRadius: 5500, phase: 120, radius: 35, mass: 2, color: [180, 190, 195] },
   { id: "neptune", name: "Neptune", parent: "sun", orbitRadius: 160000, phase: 170, radius: 250, mass: 600, color: [100, 140, 230] },
@@ -2292,9 +2292,27 @@ function drawStars() {
 }
 
 function drawBody(body) {
+  if (body.atmosphere) drawAtmosphere(body);
   noStroke();
   fill(...body.color);
   circle(body.x, body.y, Math.max(body.radius * 2, 6 / zoom));
+}
+
+// halo translucide (anneaux concentriques, de plus en plus transparents vers
+// l'extérieur) représentant l'atmosphère : purement visuel, la physique
+// réelle (densité exponentielle) est calculée séparément dans stepShip
+function drawAtmosphere(body) {
+  const atmo = body.atmosphere;
+  const col = atmo.color || body.color;
+  const rings = 10;
+  noStroke();
+  for (let i = rings; i >= 1; i--) {
+    const frac = i / rings; // 1 = bord extérieur, →0 = près du sol
+    const r = body.radius + atmo.height * frac;
+    const alpha = (1 - frac) * (1 - frac) * 70 * Math.min(1.4, atmo.density);
+    fill(col[0], col[1], col[2], alpha);
+    circle(body.x, body.y, r * 2);
+  }
 }
 
 // nom des astres trop petits à l'écran pour être reconnus
