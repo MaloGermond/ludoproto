@@ -37,14 +37,14 @@ const LANDING_MAX_SPEED = 120;
 
 // atmosphère : seuls certains astres en ont une (cf. BODY_CONFIGS, champ
 // `atmosphere`). Densité décroissante avec l'altitude (échelle = hauteur/5,
-// approximation d'une vraie atmosphère) ; la hauteur est volontairement
-// tenue sous l'altitude de parking (cf. parkingRadius) pour que les orbites
-// normales restent dans le vide — seuls le décollage, l'approche basse et
-// la rentrée la traversent. Elle freine (traînée en v²) et échauffe
-// (flux en v³) le vaisseau ; au-delà de HEAT_MAX, il se consume.
-const DRAG_COEFF = 0.0006; // accél. de freinage = DRAG_COEFF × densité × vitesse²
-const HEAT_RATE = 0.000012; // gain de chaleur/s = HEAT_RATE × densité × vitesse³
-const HEAT_COOLING = 6; // perte de chaleur/s par rayonnement, même hors atmosphère
+// approximation d'une vraie atmosphère) ; parkingRadius() tient compte de la
+// hauteur pour qu'une orbite de parking normale reste au-dessus, mais une
+// orbite basse ou un passage au ras du sol la traversent franchement. Elle
+// freine (traînée en v²) et échauffe (flux en v³) le vaisseau ; au-delà de
+// HEAT_MAX, il se consume.
+const DRAG_COEFF = 0.0035; // accél. de freinage = DRAG_COEFF × densité × vitesse²
+const HEAT_RATE = 0.00004; // gain de chaleur/s = HEAT_RATE × densité × vitesse³
+const HEAT_COOLING = 3; // perte de chaleur/s par rayonnement, même hors atmosphère
 const HEAT_MAX = 100;
 
 // rotation façon RCS spatial : maintenir ←/→ accélère en continu la vitesse
@@ -117,10 +117,10 @@ const PHASE_STYLES = {
 const BODY_CONFIGS = [
   { id: "sun", name: "Soleil", parent: null, radius: 900, mass: 40000, color: [255, 210, 90] },
   { id: "mercury", name: "Mercure", parent: "sun", orbitRadius: 3500, phase: 200, radius: 50, mass: 35, color: [180, 170, 160] },
-  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 750, color: [230, 200, 140], atmosphere: { height: 55, density: 2.2, color: [235, 210, 150] } },
-  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200], atmosphere: { height: 70, density: 1, color: [150, 190, 255] } },
+  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 750, color: [230, 200, 140], atmosphere: { height: 130, density: 2.2, color: [235, 210, 150] } },
+  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200], atmosphere: { height: 150, density: 1, color: [150, 190, 255] } },
   { id: "moon", name: "Lune", parent: "earth", orbitRadius: 2200, phase: 60, radius: 60, mass: 22, color: [180, 180, 180] },
-  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 200, color: [210, 120, 80], atmosphere: { height: 40, density: 0.15, color: [220, 160, 120] } },
+  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 200, color: [210, 120, 80], atmosphere: { height: 75, density: 0.4, color: [220, 160, 120] } },
   { id: "phobos", name: "Phobos", parent: "mars", orbitRadius: 500, phase: 30, radius: 15, mass: 1, color: [140, 130, 120] },
   { id: "deimos", name: "Déimos", parent: "mars", orbitRadius: 1000, phase: 210, radius: 12, mass: 1, color: [150, 140, 130] },
   { id: "jupiter", name: "Jupiter", parent: "sun", orbitRadius: 36000, phase: 250, radius: 500, mass: 3000, color: [220, 180, 140] },
@@ -129,7 +129,7 @@ const BODY_CONFIGS = [
   { id: "ganymede", name: "Ganymède", parent: "jupiter", orbitRadius: 6500, phase: 180, radius: 55, mass: 16, color: [160, 150, 140] },
   { id: "callisto", name: "Callisto", parent: "jupiter", orbitRadius: 10500, phase: 270, radius: 50, mass: 12, color: [120, 110, 100] },
   { id: "saturn", name: "Saturne", parent: "sun", orbitRadius: 68000, phase: 320, radius: 420, mass: 1500, color: [230, 210, 160] },
-  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 22, color: [220, 180, 110], atmosphere: { height: 35, density: 1.3, color: [210, 160, 90] } },
+  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 22, color: [220, 180, 110], atmosphere: { height: 65, density: 1.3, color: [210, 160, 90] } },
   { id: "uranus", name: "Uranus", parent: "sun", orbitRadius: 108000, phase: 30, radius: 260, mass: 600, color: [160, 220, 230] },
   { id: "titania", name: "Titania", parent: "uranus", orbitRadius: 5500, phase: 120, radius: 35, mass: 2, color: [180, 190, 195] },
   { id: "neptune", name: "Neptune", parent: "sun", orbitRadius: 160000, phase: 170, radius: 250, mass: 600, color: [100, 140, 230] },
@@ -870,7 +870,8 @@ function mod(a, n) {
 }
 
 function parkingRadius(body) {
-  return body.radius + Math.max(80, body.radius * 0.5);
+  const clear = body.atmosphere ? body.atmosphere.height * 1.3 : 0;
+  return body.radius + Math.max(80, body.radius * 0.5, clear);
 }
 
 // orbite la plus haute utilisable autour d'un astre (sous les sphères
