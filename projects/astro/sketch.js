@@ -15,55 +15,49 @@
 // celle-ci. Les orbites restent ainsi stables et prévisibles.
 
 import {
+  autopilotControl,
+  copyNode,
+  createAutopilot,
+  remainingNodes,
+} from "./src/autopilot/index.js";
+import {
+  circularDv,
+  computeRoute,
+  displayPosition,
+  findLandingAt,
+  landAsap,
+  layoutPrediction,
+  makeBurnNode,
+  makeCtx,
+  PLAN_MAX_HORIZON,
+  planDone,
+  PlanError,
+  predictPath,
+  runCtx,
+  THRUST_PREDICTION_HORIZON,
+} from "./src/plan/index.js";
+import {
   ALL_BODIES,
-  AUTOPILOT_SLEW_RATE,
-  COAST,
+  bodies,
+  bodyById,
+  bodyPositionAt,
+  constrain,
+  createShip,
+  degrees,
   FUEL_MAX,
   HALF_PI,
   HEAT_MAX,
   PI,
   ROTATION_TAP_UNIT,
-  SHIP_SIZE,
   SIM_DT,
-  THRUST_ACCEL,
-  TWO_PI,
-  angleDiff,
-  bodies,
-  bodyById,
-  bodyPositionAt,
-  bodyVelocityAt,
-  cloneShip,
-  constrain,
-  createShip,
-  degrees,
-  isAncestorOrSelf,
-  localOrbit,
-  orbitElements,
-  progradeAngle,
-  radians,
   stepShip,
   sun,
   syncShipAbsolute,
+  THRUST_ACCEL,
 } from "./src/sim/index.js";
 
 const MAX_FRAME_DT = 0.25; // évite une avalanche de pas après un onglet en arrière-plan
 const WARP_LEVELS = [1, 2, 5, 10, 25, 50, 100]; // accélération du temps
-
-// atterrissage guidé : le moteur s'allume quand la décélération nécessaire
-// pour s'arrêter au sol atteint cette fraction de la poussée maximale
-// ("suicide burn"), puis la poussée est dosée pour toucher le sol à l'arrêt
-const LANDING_IGNITION = 0.85;
-const LANDING_MAX_TILT = 0.35; // rad — inclinaison max pour annuler la dérive horizontale
-const LANDING_TIMEOUT = 3000; // s — garde-fou pour la vérification d'un atterrissage
-
-// prédiction
-const PLAN_MAX_HORIZON = 20000; // s — garde-fou, le tracé s'arrête normalement bien avant
-const PLAN_TAIL = 60; // s — durée minimale de tracé après la dernière manœuvre
-const MAX_TAIL = 2000; // s — au plus une orbite complète après la dernière manœuvre
-const ESCAPE_TAIL = 600; // s — trajectoire non liée (évasion)
-const THRUST_PREDICTION_HORIZON = 120; // s — tracé allégé pendant une poussée manuelle
-const POINT_MAX_ANGLE = 0.026; // rad — un point de tracé tous les ~1,5° autour de l'astre
-const POINT_MAX_GAP = 3; // s
 
 // édition
 const PICK_RADIUS = 14; // px — distance max d'un clic au tracé pour y poser un point
@@ -136,321 +130,6 @@ function recenterCamera(view, ship) {
   view.cameraFrame = null;
 }
 
-// ---------------------------------------------------------------------------
-// Copies : la simulation et la planification travaillent sur des copies
-// pour explorer des futurs possibles sans toucher à l'état du jeu
-// ---------------------------------------------------------------------------
-
-// kind : undefined pour une manœuvre classique (rotation + poussée fixe),
-// "land" pour un atterrissage guidé
-function copyNode(n) {
-  return { id: n.id, kind: n.kind, t: n.t, heading: n.heading, power: n.power, duration: n.duration };
-}
-
-function cloneAutopilot(ap) {
-  return { ...ap, nodes: ap.nodes.map((n) => ({ ...n })) };
-}
-
-function cloneCtx(c) {
-  return { s: cloneShip(c.s), t: c.t, ap: c.ap ? cloneAutopilot(c.ap) : null };
-}
-
-// ---------------------------------------------------------------------------
-// Pilote automatique : exécute les manœuvres dans l'ordre chronologique.
-// Chaque manœuvre = rotation vers le cap (relatif au prograde au moment où
-// elle démarre), puis poussée (puissance × durée). Une manœuvre ne démarre
-// qu'une fois la précédente terminée : le temps de rotation décale la suite.
-// ---------------------------------------------------------------------------
-
-function createAutopilot(nodes) {
-  return {
-    nodes: nodes.map(copyNode).sort((a, b) => a.t - b.t),
-    index: 0,
-    phase: "pending", // "pending" | "rotating" | "burning"
-    targetAngle: 0,
-    burnEnd: 0,
-  };
-}
-
-// commande de l'atterrissage guidé : nez vers le haut (incliné pour annuler
-// la vitesse horizontale), poussée déclenchée au dernier moment et dosée
-// pour que vitesse de descente et altitude s'annulent ensemble
-function landingControl(s) {
-  const R = s.ref;
-  const r = Math.hypot(s.rx, s.ry);
-  const up = Math.atan2(s.ry, s.rx);
-  const h = r - (R.radius + SHIP_SIZE / 2);
-  const vRadial = (s.rx * s.rvx + s.ry * s.rvy) / r; // < 0 en descente
-  const vTangent = (s.rx * s.rvy - s.ry * s.rvx) / r;
-  const g = R.mu / (r * r);
-
-  const target = up + constrain(-vTangent * 0.05, -LANDING_MAX_TILT, LANDING_MAX_TILT);
-  const descent = Math.max(0, -vRadial);
-  const needed = (descent * descent) / (2 * Math.max(h - 1, 0.5)) + g;
-  let thrust = 0;
-  if (vRadial < 0 && needed > LANDING_IGNITION * THRUST_ACCEL) thrust = Math.min(1, needed / THRUST_ACCEL);
-  // pas de poussée tant que le vaisseau n'est pas orienté
-  if (Math.abs(angleDiff(s.angle, target)) > 0.3) thrust = 0;
-  return { ...COAST, slewTo: target, thrust };
-}
-
-function recordAt(node, key, s, t) {
-  node[key + "T"] = t;
-  node[key + "Ref"] = s.ref;
-  node[key + "X"] = s.rx;
-  node[key + "Y"] = s.ry;
-}
-
-// fait avancer les phases du plan à l'instant t et renvoie la commande du
-// prochain pas, ou null quand le plan est terminé. Note au passage, dans
-// chaque manœuvre, où et quand elle a réellement démarré/poussé/fini.
-function autopilotControl(ap, s, t) {
-  while (ap.index < ap.nodes.length) {
-    const node = ap.nodes[ap.index];
-
-    if (ap.phase === "pending") {
-      if (t < node.t) return COAST;
-      if (node.kind === "land") {
-        ap.phase = "landing";
-        node.fuelBefore = s.fuel;
-        recordAt(node, "start", s, t);
-      } else {
-        ap.targetAngle = progradeAngle(s) + radians(node.heading);
-      ap.phase = "rotating";
-        node.targetAngle = ap.targetAngle;
-        node.fuelBefore = s.fuel;
-        recordAt(node, "start", s, t);
-      }
-    }
-
-    if (ap.phase === "landing") {
-      if (!s.landed) {
-        const control = landingControl(s);
-        if (control.thrust > 0 && node.burnStartT === undefined) recordAt(node, "burnStart", s, t);
-        return control;
-      }
-      recordAt(node, "end", s, t);
-      node.fuelAfter = s.fuel;
-      ap.index++;
-      ap.phase = "pending";
-      continue;
-    }
-
-    if (ap.phase === "rotating") {
-      if (angleDiff(s.angle, ap.targetAngle) !== 0) {
-        return { ...COAST, slewTo: ap.targetAngle };
-      }
-      ap.phase = "burning";
-      ap.burnEnd = t + node.duration;
-      recordAt(node, "burnStart", s, t);
-    }
-
-    if (ap.phase === "burning") {
-      if (node.power > 0 && t < ap.burnEnd - 1e-9) {
-        return { ...COAST, slewTo: ap.targetAngle, thrust: node.power };
-      }
-      recordAt(node, "end", s, t);
-      node.fuelAfter = s.fuel;
-      ap.index++;
-      ap.phase = "pending";
-    }
-  }
-  return null;
-}
-
-// manœuvres pas encore terminées, pour les rééditer en cours d'exécution
-function remainingNodes(ap, t) {
-  return ap.nodes.slice(ap.index).map((n, i) => {
-    const node = copyNode(n);
-    if (i === 0 && ap.phase !== "pending") {
-      node.t = t;
-      if (ap.phase === "burning") node.duration = Math.max(0, ap.burnEnd - t);
-    }
-    return node;
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Simulation "hors jeu" : contexte reprenable (état + plan + temps), utilisé
-// par la prédiction et par le calculateur de route. Même pas, même code que
-// la simulation en direct : résultats identiques au bit près.
-// ---------------------------------------------------------------------------
-
-function makeCtx(state, t, nodes) {
-  return { s: cloneShip(state), t, ap: nodes && nodes.length ? createAutopilot(nodes) : null };
-}
-
-function planDone(ctx) {
-  return !ctx.ap || ctx.ap.index >= ctx.ap.nodes.length;
-}
-
-// avance le contexte jusqu'à tEnd ; `onStep` peut renvoyer false pour arrêter
-function runCtx(ctx, tEnd, onStep) {
-  while (ctx.t < tEnd - 1e-9 && !ctx.s.crashed) {
-    const control = ctx.ap ? autopilotControl(ctx.ap, ctx.s, ctx.t) || COAST : COAST;
-    stepShip(ctx.s, ctx.t, SIM_DT, control);
-    ctx.t += SIM_DT;
-    if (onStep && onStep(ctx) === false) break;
-  }
-  return ctx;
-}
-
-// ---------------------------------------------------------------------------
-// Prédiction de trajectoire, découpée en "patchs" : un patch par sphère
-// d'influence traversée. Chaque point est stocké relativement à l'astre de
-// son patch ; l'affichage place chaque patch autour de son astre (voir
-// displayAnchors).
-// ---------------------------------------------------------------------------
-
-// durée de tracé après la dernière manœuvre : une orbite complète si elle
-// est fermée, sinon un temps fixe
-function tailDuration(s) {
-  if (s.landed) return 0;
-  const el = orbitElements(s);
-  if (el.bound && el.apoapsis < s.ref.soi) return constrain(el.period * 1.02, PLAN_TAIL, MAX_TAIL);
-  return ESCAPE_TAIL;
-}
-
-function predictPath(startState, t0, plan, maxHorizon) {
-  const ctx = { s: cloneShip(startState), t: t0, ap: plan ? cloneAutopilot(plan) : null };
-  const s = ctx.s;
-  const patches = [{ body: s.ref, t: t0 }];
-  const points = [];
-  let last = null;
-  const pushPoint = (phase) => {
-    last = { rx: s.rx, ry: s.ry, t: ctx.t, phase, patch: patches.length - 1 };
-    points.push(last);
-  };
-  pushPoint("coast");
-
-  let lastPhase = "coast";
-  let end = null;
-  let tEnd = t0 + maxHorizon;
-  let orbitStart = null;
-  if (planDone(ctx)) {
-    orbitStart = t0;
-    tEnd = Math.min(tEnd, t0 + tailDuration(s));
-  }
-
-  while (ctx.t < tEnd - 1e-9) {
-    const control = ctx.ap ? autopilotControl(ctx.ap, s, ctx.t) || COAST : COAST;
-    const phase = control.thrust > 0 ? "burn" : control.slewTo !== null ? "rotate" : "coast";
-    if (phase !== lastPhase) {
-      pushPoint(lastPhase); // borne exacte du changement de phase
-      lastPhase = phase;
-    }
-
-    const ref = s.ref;
-    stepShip(s, ctx.t, SIM_DT, control);
-    ctx.t += SIM_DT;
-
-    if (s.ref !== ref) {
-      patches.push({ body: s.ref, t: ctx.t });
-      pushPoint(phase);
-      continue;
-    }
-    if (s.crashed) {
-      end = "crash";
-      break;
-    }
-    const done = planDone(ctx);
-    if (s.landed && done && ctx.t > t0 + SIM_DT) {
-      end = "landed";
-      break;
-    }
-    if (done && orbitStart === null) {
-      orbitStart = ctx.t;
-      tEnd = Math.min(tEnd, ctx.t + tailDuration(s));
-    }
-
-    // densité de points : fonction de l'angle parcouru autour de l'astre
-    const cross = last.rx * s.ry - last.ry * s.rx;
-    const dot = last.rx * s.rx + last.ry * s.ry;
-    const lastR = Math.hypot(last.rx, last.ry);
-    const r = Math.hypot(s.rx, s.ry);
-    if (Math.abs(Math.atan2(cross, dot)) > POINT_MAX_ANGLE || Math.abs(r - lastR) > 0.02 * r || ctx.t - last.t > POINT_MAX_GAP) {
-      pushPoint(phase);
-    }
-  }
-  pushPoint(lastPhase);
-
-  // seules les manœuvres restantes (les terminées ne s'affichent plus)
-  const firstNode = plan ? plan.index : 0;
-  const nodes = ctx.ap ? ctx.ap.nodes.slice(firstNode) : [];
-  const patchIndexAt = (t, body) => {
-    let k = 0;
-    for (let j = 0; j < patches.length; j++) if (patches[j].t <= t + 1e-9 && patches[j].body === body) k = j;
-    return k;
-  };
-  for (const n of nodes) {
-    if (n.startT !== undefined) n.startPatch = patchIndexAt(n.startT, n.startRef);
-    if (n.burnStartT !== undefined) n.burnStartPatch = patchIndexAt(n.burnStartT, n.burnStartRef);
-  }
-
-  // apogée/périgée de l'orbite finale (dernier patch, après la dernière manœuvre)
-  let periapsis = null;
-  let apoapsis = null;
-  if (end !== "crash" && orbitStart !== null) {
-    const lastPatch = patches.length - 1;
-    for (const p of points) {
-      if (p.t < orbitStart || p.patch !== lastPatch) continue;
-      const d = Math.hypot(p.rx, p.ry);
-      if (!periapsis || d < periapsis.dist) periapsis = { ...p, dist: d };
-      if (!apoapsis || d > apoapsis.dist) apoapsis = { ...p, dist: d };
-    }
-  }
-
-  return { points, patches, nodes, firstNode, end, periapsis, apoapsis, finalState: s, finalT: ctx.t };
-}
-
-// position d'affichage de chaque patch à l'instant T :
-// - le patch courant est dessiné autour de la position actuelle de son astre ;
-// - un patch dans l'astre parent (ou un ancêtre) est dessiné autour de la
-//   position actuelle de cet astre, comme dans KSP ;
-// - un patch dans un autre astre (satellite ou voisin rencontré en route)
-//   est dessiné dans la continuité du tracé : autour de la position qu'aura
-//   cet astre au moment de la rencontre (astre "fantôme").
-function displayAnchors(pred, T) {
-  const P = pred.patches;
-  let k = 0;
-  for (let j = 0; j < P.length; j++) if (P[j].t <= T + 1e-9) k = j;
-  const anchors = new Array(P.length).fill(null);
-  const broken = new Array(P.length).fill(false);
-  anchors[k] = bodyPositionAt(P[k].body, T);
-  for (let j = k + 1; j < P.length; j++) {
-    const B = P[j].body;
-    if (isAncestorOrSelf(B, P[k].body)) {
-      anchors[j] = bodyPositionAt(B, T);
-      broken[j] = true;
-    } else {
-      const te = P[j].t;
-      const pb = bodyPositionAt(B, te);
-      const pa = bodyPositionAt(P[j - 1].body, te);
-      anchors[j] = { x: anchors[j - 1].x + pb.x - pa.x, y: anchors[j - 1].y + pb.y - pa.y };
-    }
-  }
-  return { anchors, broken, current: k };
-}
-
-// calcule les coordonnées d'affichage des points visibles (à partir de T)
-function layoutPrediction(pred, T) {
-  const layout = displayAnchors(pred, T);
-  const display = [];
-  for (const p of pred.points) {
-    if (p.patch < layout.current || (p.patch === layout.current && p.t < T - 1e-9)) continue;
-    const a = layout.anchors[p.patch];
-    display.push({ x: a.x + p.rx, y: a.y + p.ry, t: p.t, phase: p.phase, patch: p.patch });
-  }
-  pred.layout = layout;
-  pred.display = display;
-  return pred;
-}
-
-function displayPosition(pred, patch, rx, ry) {
-  const a = pred.layout.anchors[patch];
-  return a ? { x: a.x + rx, y: a.y + ry } : null;
-}
-
 function currentPlanPrediction(world) {
   const plan = world.plan;
   if (plan.dirty || !plan.prediction) {
@@ -473,589 +152,28 @@ function currentFlightPrediction(world) {
   return world.flightPrediction;
 }
 
-// ---------------------------------------------------------------------------
-// Calculateur de route : choisir un astre et une altitude, il construit les
-// manœuvres pour s'y mettre en orbite circulaire.
-//
-// Déroulé (chaque étape se termine en orbite circulaire) :
-//  1. décollage vertical puis circularisation à l'apogée (si posé) ;
-//  2. remontée vers l'astre parent tant que la destination n'est pas dans
-//     la même famille (ex : Lune → Terre) ;
-//  3. transfert de Hohmann vers la destination (fenêtre de tir calculée
-//     d'après les positions des astres), avec évasion si besoin ;
-//  4. correction à mi-parcours (recherche numérique sur la trajectoire
-//     simulée) pour passer exactement à l'altitude visée ;
-//  5. circularisation au périastre, puis petites corrections.
-// ---------------------------------------------------------------------------
-
-class PlanError extends Error {}
-
-function mod(a, n) {
-  return ((a % n) + n) % n;
-}
-
-function parkingRadius(body) {
-  const clear = body.atmosphere ? body.atmosphere.height * 1.3 : 0;
-  return body.radius + Math.max(80, body.radius * 0.5, clear);
-}
-
-// orbite la plus haute utilisable autour d'un astre (sous les sphères
-// d'influence de ses satellites et dans la sienne)
-function maxOrbitRadius(body) {
-  let max = body.soi * 0.8;
-  for (const c of body.children) max = Math.min(max, (c.orbitRadius - c.soi) * 0.9);
-  return max;
-}
-
-// Δv (vecteur) à appliquer pour une orbite circulaire au rayon actuel.
-// dir : +1 sens direct (celui des astres), -1 rétrograde, 0 garder le sens actuel
-function circularDv(s, dir) {
-  const r = Math.hypot(s.rx, s.ry);
-  const v = Math.sqrt(s.ref.mu / r);
-  const sign = dir || Math.sign(s.rx * s.rvy - s.ry * s.rvx) || 1;
-  const tx = (-s.ry / r) * sign;
-  const ty = (s.rx / r) * sign;
-  return { x: tx * v - s.rvx, y: ty * v - s.rvy };
-}
-
-function tangentialDv(s, speed) {
-  const r = Math.hypot(s.rx, s.ry);
-  const sign = Math.sign(s.rx * s.rvy - s.ry * s.rvx) || 1;
-  return { x: (-s.ry / r) * sign * speed - s.rvx, y: (s.rx / r) * sign * speed - s.rvy };
-}
-
-function progradeDv(s, m) {
-  const v = Math.hypot(s.rvx, s.rvy) || 1;
-  return { x: (s.rvx / v) * m, y: (s.rvy / v) * m };
-}
-
-// construit une manœuvre dont la poussée est centrée sur tCenter (ou dès que
-// possible) et réalise le Δv donné par dvFn(état au centre de la poussée).
-// Le temps de rotation préalable est pris en compte pour avancer le départ.
-function makeBurnNode(ctx, tCenter, dvFn) {
-  let center = Math.max(tCenter, ctx.t);
-  let node = null;
-  for (let iter = 0; iter < 5; iter++) {
-    const probe = runCtx(cloneCtx(ctx), center);
-    const dv = dvFn(probe.s);
-    const m = Math.hypot(dv.x, dv.y);
-    if (!(m > 1e-3)) return null;
-    const angle = Math.atan2(dv.y, dv.x);
-    // Δv exact : nombre entier de pas, puissance ajustée
-    const steps = Math.max(1, Math.ceil(m / (THRUST_ACCEL * SIM_DT)));
-    const duration = steps * SIM_DT;
-    const power = m / (steps * THRUST_ACCEL * SIM_DT);
-
-    let start = Math.max(ctx.t, center - duration / 2);
-    for (let k = 0; k < 2; k++) {
-      const at = runCtx(cloneCtx(ctx), start);
-      const rot = Math.abs(angleDiff(at.s.angle, angle)) / AUTOPILOT_SLEW_RATE;
-      start = Math.max(ctx.t, center - duration / 2 - rot);
-    }
-    const at = runCtx(cloneCtx(ctx), start);
-    const rot = Math.abs(angleDiff(at.s.angle, angle)) / AUTOPILOT_SLEW_RATE;
-    node = { t: at.t, heading: degrees(angleDiff(progradeAngle(at.s), angle)), power, duration };
-    const newCenter = at.t + rot + duration / 2;
-    if (Math.abs(newCenter - center) < SIM_DT) break;
-    center = newCenter;
-  }
-  return node;
-}
-
-// ajoute la manœuvre au plan et simule jusqu'à sa fin
-function commitNode(ctx, node, nodes) {
-  const c = cloneCtx(ctx);
-  if (c.ap) c.ap.nodes.push(copyNode(node));
-  else c.ap = createAutopilot([node]);
-  nodes.push(node);
-  runCtx(c, node.t + node.duration + 120, (cc) => !planDone(cc));
-  if (c.s.crashed) throw new PlanError("La trajectoire calculée mène à un crash.");
-  return c;
-}
-
-// prochain passage à un apside (vitesse radiale qui change de signe)
-function nextApsisTime(ctx, maxSpan, minSpan = 0) {
-  const c = cloneCtx(ctx);
-  const ref = c.s.ref;
-  let sign = Math.sign(c.s.rx * c.s.rvx + c.s.ry * c.s.rvy);
-  let found = null;
-  runCtx(c, ctx.t + maxSpan, (cc) => {
-    if (cc.s.ref !== ref) return false;
-    const sg = Math.sign(cc.s.rx * cc.s.rvx + cc.s.ry * cc.s.rvy);
-    if (sign === 0) sign = sg;
-    if (sg !== 0 && sg !== sign) {
-      if (cc.t - ctx.t >= minSpan) {
-        found = cc.t;
-        return false;
-      }
-      sign = sg;
-    }
-  });
-  return found;
-}
-
-// circularise autour de l'astre courant, poussée centrée sur tCenter, puis
-// corrige le résidu d'excentricité aux apsides suivants
-function circularize(ctx, tCenter, nodes, dir = 0) {
-  let node = makeBurnNode(ctx, tCenter, (s) => circularDv(s, dir));
-  if (node) ctx = commitNode(ctx, node, nodes);
-  for (let k = 0; k < 2; k++) {
-    const el = orbitElements(ctx.s);
-    if (!el.bound || el.e < 0.01) break;
-    const tA = nextApsisTime(ctx, el.period, el.period * 0.1);
-    if (tA === null) break;
-    node = makeBurnNode(ctx, tA, (s) => circularDv(s, 0));
-    if (!node) break;
-    ctx = commitNode(ctx, node, nodes);
-  }
-  return ctx;
-}
-
-// décollage vertical puis circularisation à l'apogée, au rayon rp
-function legLaunch(ctx, rp, nodes) {
-  const body = ctx.s.ref;
-  const tryDv = (dv) => {
-    const steps = Math.max(1, Math.ceil(dv / (THRUST_ACCEL * SIM_DT)));
-    const node = { t: ctx.t, heading: 0, power: dv / (steps * THRUST_ACCEL * SIM_DT), duration: steps * SIM_DT };
-    const c = commitNode(ctx, node, []);
-    const apex = cloneCtx(c);
-    let rmax = Math.hypot(apex.s.rx, apex.s.ry);
-    runCtx(apex, apex.t + 1000, (cc) => {
-      if (cc.s.ref !== body || cc.s.landed) return false;
-      rmax = Math.max(rmax, Math.hypot(cc.s.rx, cc.s.ry));
-      return cc.s.rx * cc.s.rvx + cc.s.ry * cc.s.rvy > 0;
-    });
-    return { rmax, node, afterBurn: c, tApex: apex.t };
-  };
-
-  let lo = 0;
-  let hi = ctx.s.fuel;
-  if (tryDv(hi).rmax < rp) throw new PlanError("Pas assez de carburant pour décoller jusqu'à cette altitude.");
-  for (let i = 0; i < 30; i++) {
-    const mid = (lo + hi) / 2;
-    if (tryDv(mid).rmax < rp) lo = mid;
-    else hi = mid;
-  }
-  const best = tryDv(hi);
-  nodes.push(best.node);
-  return circularize(best.afterBurn, best.tApex, nodes, 1);
-}
-
-// remet le vaisseau sur une orbite circulaire s'il en est loin
-function legStabilize(ctx, nodes) {
-  const body = ctx.s.ref;
-  const el = orbitElements(ctx.s);
-  const low = el.periapsis < body.radius + 20;
-  if (el.bound && el.e < 0.05 && !low && el.apoapsis < body.soi) return ctx;
-  if (low) {
-    // trajectoire suborbitale : on circularise au sommet de la montée
-    const climbing = ctx.s.rx * ctx.s.rvx + ctx.s.ry * ctx.s.rvy > 0;
-    const tA = climbing ? nextApsisTime(ctx, el.bound ? el.period : 2000) : null;
-    if (tA === null || el.apoapsis < body.radius + 30) {
-      throw new PlanError("Trajectoire trop basse pour se mettre en orbite : reprenez de l'altitude ou posez-vous.");
-    }
-    return circularize(ctx, tA, nodes, 1);
-  }
-  return circularize(ctx, ctx.t, nodes, 0);
-}
-
-// changement d'altitude autour du même astre (transfert de Hohmann)
-function legAltitude(ctx, rt, nodes) {
-  const mu = ctx.s.ref.mu;
-  const r1 = Math.hypot(ctx.s.rx, ctx.s.ry);
-  if (Math.abs(r1 - rt) < 2) return ctx;
-  const node = makeBurnNode(ctx, ctx.t, (s) => {
-    const r = Math.hypot(s.rx, s.ry);
-    const a = (r + rt) / 2;
-    return tangentialDv(s, Math.sqrt(mu * (2 / r - 1 / a)));
-  });
-  if (node) ctx = commitNode(ctx, node, nodes);
-  const el = orbitElements(ctx.s);
-  const tA = nextApsisTime(ctx, el.bound ? el.period : 2000, 1);
-  if (tA === null) throw new PlanError("Transfert d'altitude impossible.");
-  return circularize(ctx, tA, nodes, 0);
-}
-
-// passage au plus près d'un astre, signé par le sens de rotation autour de
-// lui (positif = sens direct) : c'est la grandeur que la correction vise
-function signedApproach(ctx, B, tMax) {
-  const c = cloneCtx(ctx);
-  let best = { d: Infinity, signed: Infinity, t: c.t };
-  const measure = (cc) => {
-    let dx, dy, dvx, dvy;
-    if (cc.s.ref === B) {
-      dx = cc.s.rx;
-      dy = cc.s.ry;
-      dvx = cc.s.rvx;
-      dvy = cc.s.rvy;
-    } else {
-      const pr = bodyPositionAt(cc.s.ref, cc.t);
-      const vr = bodyVelocityAt(cc.s.ref, cc.t);
-      const pb = bodyPositionAt(B, cc.t);
-      const vb = bodyVelocityAt(B, cc.t);
-      dx = pr.x + cc.s.rx - pb.x;
-      dy = pr.y + cc.s.ry - pb.y;
-      dvx = vr.vx + cc.s.rvx - vb.vx;
-      dvy = vr.vy + cc.s.rvy - vb.vy;
-    }
-    const d = Math.hypot(dx, dy);
-    if (d < best.d) best = { d, signed: (Math.sign(dx * dvy - dy * dvx) || 1) * d, t: cc.t };
-    // périastre passé dans la sphère d'influence : inutile d'aller plus loin
-    if (cc.s.ref === B && dx * dvx + dy * dvy > 0) return false;
-  };
-  runCtx(c, tMax, measure);
-  return best;
-}
-
-// Δv d'intensité m dans la direction faisant l'angle phi avec le prograde
-function directionDv(s, m, phi) {
-  const v = Math.hypot(s.rvx, s.rvy) || 1;
-  const px = s.rvx / v;
-  const py = s.rvy / v;
-  const c = Math.cos(phi);
-  const sn = Math.sin(phi);
-  return { x: m * (c * px - sn * py), y: m * (c * py + sn * px) };
-}
-
-// correction de trajectoire : poussée d'intensité m (balayage puis
-// dichotomie) pour annuler objective(contexte). La direction suit d'abord
-// le gradient de l'objectif (mélange prograde/radial), puis le prograde et
-// le radial seuls si besoin.
-function correctTrajectory(ctx, objective, scale, tol, nodes) {
-  const f0 = objective(ctx);
-  if (Math.abs(f0) < tol) return ctx;
-  const evalM = (m, phi) => {
-    if (Math.abs(m) < 1e-4) return { f: f0, c: ctx, node: null };
-    const node = makeBurnNode(ctx, ctx.t, (s) => directionDv(s, m, phi));
-    if (!node) return { f: f0, c: ctx, node: null };
-    let c;
-    try {
-      c = commitNode(ctx, node, []);
-    } catch (e) {
-      return { f: NaN };
-    }
-    return { f: objective(c), c, node };
-  };
-
-  const d = scale * 0.02;
-  const fp = evalM(d, 0).f;
-  const fr = evalM(d, HALF_PI).f;
-  const directions = [0, HALF_PI];
-  if (Number.isFinite(fp) && Number.isFinite(fr)) directions.unshift(Math.atan2(fr - f0, fp - f0));
-
-  for (const phi of directions) {
-    const found = searchAlong(evalM, phi, f0, scale, tol);
-    if (found) {
-      if (!found.node) return ctx;
-      nodes.push(found.node);
-      return found.c;
-    }
-  }
-  throw new PlanError("Correction de trajectoire introuvable — essayez une autre altitude.");
-}
-
-function searchAlong(evalM, phi, f0, scale, tol) {
-  const N = 12;
-  const samples = [];
-  for (let i = -N; i <= N; i++) {
-    const m = (scale * i) / N;
-    samples.push({ m, ...(i === 0 ? { f: f0, node: null } : evalM(m, phi)) });
-  }
-  const brackets = [];
-  for (let i = 1; i < samples.length; i++) {
-    const a = samples[i - 1];
-    const b = samples[i];
-    if (Number.isFinite(a.f) && Number.isFinite(b.f) && Math.sign(a.f) !== Math.sign(b.f)) brackets.push([a, b]);
-  }
-  brackets.sort((p, q) => Math.min(Math.abs(p[0].m), Math.abs(p[1].m)) - Math.min(Math.abs(q[0].m), Math.abs(q[1].m)));
-
-  for (let [a, b] of brackets) {
-    for (let i = 0; i < 30; i++) {
-      const mid = { m: (a.m + b.m) / 2 };
-      Object.assign(mid, evalM(mid.m, phi));
-      if (!Number.isFinite(mid.f)) break;
-      if (Math.sign(mid.f) === Math.sign(a.f)) a = mid;
-      else b = mid;
-      if (Math.abs(mid.f) < tol) break;
-    }
-    const best = Math.abs(a.f) < Math.abs(b.f) ? a : b;
-    if (Number.isFinite(best.f) && Math.abs(best.f) < tol) return best;
-  }
-  return null;
-}
-
-// descente vers un satellite de l'astre courant (ex : Terre → Lune)
-function legDown(ctx, B, rt, nodes) {
-  const P = ctx.s.ref;
-  const mu = P.mu;
-  const r1 = Math.hypot(ctx.s.rx, ctx.s.ry);
-  const r2 = B.orbitRadius;
-  const a = (r1 + r2) / 2;
-  const Th = PI * Math.sqrt((a * a * a) / mu);
-  const sgn = Math.sign(ctx.s.rx * ctx.s.rvy - ctx.s.ry * ctx.s.rvx) || 1;
-  const ws = sgn * Math.sqrt(mu / (r1 * r1 * r1));
-  const wB = B.orbitSpeed;
-
-  // fenêtre de tir : à l'arrivée (demi-orbite de transfert plus tard), le
-  // satellite doit se trouver à l'opposé du point de départ
-  const rate = wB - ws;
-  const theta = (t) => Math.atan2(ctx.s.ry, ctx.s.rx) + ws * (t - ctx.t);
-  const g = (t) => B.phase0 + wB * (t + Th) - theta(t) - PI;
-  const synodic = TWO_PI / Math.abs(rate);
-  let tb = ctx.t + (rate > 0 ? mod(-g(ctx.t), TWO_PI) : mod(g(ctx.t), TWO_PI)) / Math.abs(rate);
-  if (tb < ctx.t + 5) tb += synodic;
-
-  const base = tb - 10 > ctx.t ? runCtx(cloneCtx(ctx), tb - 10) : ctx;
-  const vt = Math.sqrt(mu * (2 / r1 - 1 / a));
-  const dep = makeBurnNode(base, tb, (s) => tangentialDv(s, vt));
-  let c = commitNode(base, dep, nodes);
-
-  // correction à mi-parcours pour passer à l'altitude visée
-  const mcc = runCtx(cloneCtx(c), c.t + 0.25 * Th);
-  const horizon = 1.6 * Th;
-  const objective = (cc) => signedApproach(cc, B, cc.t + horizon).signed - rt;
-  c = correctTrajectory(mcc, objective, Math.max(2, 0.15 * vt), Math.max(2, 0.03 * rt), nodes);
-
-  const approach = signedApproach(c, B, c.t + horizon);
-  return circularize(c, approach.t, nodes, 0);
-}
-
-// sortie de la sphère d'influence de l'astre courant C avec une vitesse
-// d'excès vinf (signée : > 0 dans le sens du mouvement de C), en visant une
-// sortie vers tExitWanted si donné
-function escapeBurn(ctx, vinfSigned, tExitWanted) {
-  const C = ctx.s.ref;
-  const mu = C.mu;
-  const rp = Math.hypot(ctx.s.rx, ctx.s.ry);
-  const sgn = Math.sign(ctx.s.rx * ctx.s.rvy - ctx.s.ry * ctx.s.rvx) || 1;
-  const vinf = Math.abs(vinfSigned);
-  const vb = Math.sqrt(vinf * vinf + 2 * mu * (1 / rp - 1 / C.soi));
-  // angle entre le point de poussée et la direction de sortie de l'hyperbole
-  const e = 1 + (rp * vinf * vinf) / mu;
-  const nuInf = Math.acos(-1 / e);
-  const Tpark = TWO_PI * Math.sqrt((rp * rp * rp) / mu);
-  const ws = (sgn * TWO_PI) / Tpark;
-  const theta0 = Math.atan2(ctx.s.ry, ctx.s.rx);
-
-  const exitDirAt = (t) => {
-    const o = localOrbit(C, t);
-    return Math.atan2(o.vy, o.vx) + (vinfSigned < 0 ? PI : 0);
-  };
-  let tExit = tExitWanted ?? ctx.t;
-  let tEsc = 0;
-  let result = null;
-  // la sortie réelle (sphère d'influence finie, poussée non instantanée)
-  // s'écarte un peu de la théorie : on mesure et on corrige à chaque tour
-  let biasAngle = 0;
-  let vb2 = vb * vb;
-  for (let iter = 0; iter < 4; iter++) {
-    const dvCur = Math.sqrt(vb2) - Math.sqrt(mu / rp);
-    const thetaP = exitDirAt(tExit) - sgn * nuInf + biasAngle;
-    const wanted = Math.max(ctx.t + 3, (tExitWanted ?? ctx.t) - tEsc);
-    // instant où le vaisseau passe à l'angle thetaP, le plus proche de `wanted`
-    const first = ctx.t + mod((thetaP - theta0) * sgn, TWO_PI) / Math.abs(ws);
-    const tb0 = first + Math.round((wanted - first) / Tpark) * Tpark;
-
-    // essaie le tour d'orbite voulu, puis les voisins, jusqu'à une sortie
-    // qui ne croise pas un satellite de C (ex : la Lune en quittant la Terre)
-    result = null;
-    for (const k of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
-      const tb = tb0 + k * Tpark;
-      if (tb < ctx.t + 3) continue;
-      const base = tb - 10 > ctx.t ? runCtx(cloneCtx(ctx), tb - 10) : ctx;
-      const node = makeBurnNode(base, tb, (s) => progradeDv(s, dvCur));
-      let c;
-      try {
-        c = commitNode(base, node, []);
-      } catch (e) {
-        continue;
-      }
-      const out = cloneCtx(c);
-      runCtx(out, out.t + 5000, (cc) => cc.s.ref === C);
-      if (out.s.ref !== C.parentBody) continue; // resté lié à C, ou capturé par un satellite
-      tEsc = out.t - tb;
-      result = { ctx: c, node, tExit: out.t };
-      // vitesse de sortie relative à C, comparée à celle voulue
-      const o = localOrbit(C, out.t);
-      const relVx = out.s.rvx - o.vx;
-      const relVy = out.s.rvy - o.vy;
-      biasAngle += angleDiff(Math.atan2(relVy, relVx), exitDirAt(out.t));
-      vb2 = Math.max(vb2 + vinf * vinf - (relVx * relVx + relVy * relVy), 2 * mu * (1 / rp - 1 / C.soi) + 1);
-      break;
-    }
-    if (!result) throw new PlanError(`Impossible de quitter l'attraction de ${C.name}.`);
-    if (tExitWanted === undefined) tExit = result.tExit;
-  }
-  return result;
-}
-
-// remontée vers l'astre parent, orbite circulaire de rayon rt autour de lui
-function legUp(ctx, rt, nodes) {
-  const C = ctx.s.ref;
-  const P = C.parentBody;
-  const rC = C.orbitRadius;
-  const vC = C.orbitSpeed * rC;
-  const hohmann = vC * (Math.sqrt((2 * rt) / (rC + rt)) - 1);
-  const minVinf = 0.6 * Math.sqrt((2 * C.mu) / C.soi);
-  const vinf = Math.sign(hohmann) * Math.max(Math.abs(hohmann), minVinf);
-  const esc = escapeBurn(ctx, vinf);
-  nodes.push(esc.node);
-
-  const a = (rC + rt) / 2;
-  const Th = PI * Math.sqrt((a * a * a) / P.mu);
-  const lower = rt < rC;
-  // rayon extrême (périastre si on descend, apoastre si on monte) autour de P
-  const extremum = (cc) => {
-    const c = cloneCtx(cc);
-    let best = null;
-    runCtx(c, cc.t + 1.3 * Th, (x) => {
-      if (x.s.ref !== P) return false;
-      const r = Math.hypot(x.s.rx, x.s.ry);
-      if (!best || (lower ? r < best.r : r > best.r)) best = { r, t: x.t };
-    });
-    return best || { r: lower ? Infinity : 0, t: cc.t };
-  };
-  const mcc = runCtx(cloneCtx(esc.ctx), esc.tExit + 5);
-  const c = correctTrajectory(mcc, (cc) => extremum(cc).r - rt, Math.max(3, Math.abs(vinf)), Math.max(2, 0.02 * rt), nodes);
-  return circularize(c, extremum(c).t, nodes, 0);
-}
-
-// temps de vol et angle parcouru sur une orbite qui part tangentiellement
-// (donc d'un apside) au rayon r1 à la vitesse v1, jusqu'au rayon r2
-function transferGeometry(mu, r1, v1, r2) {
-  const h = r1 * v1;
-  const p = (h * h) / mu;
-  const e = Math.abs(p / r1 - 1);
-  const a = p / (1 - e * e);
-  if (!(e < 1)) return null;
-  const outward = r2 > r1;
-  const cosNu = (p / r2 - 1) / e;
-  if (Math.abs(cosNu) > 1) return null; // r2 hors d'atteinte
-  const nu = Math.acos(cosNu);
-  const timeFromPeri = (anomaly) => {
-    const E = 2 * Math.atan(Math.sqrt((1 - e) / (1 + e)) * Math.tan(anomaly / 2));
-    return (E - e * Math.sin(E)) * Math.sqrt((a * a * a) / mu);
-  };
-  const T = TWO_PI * Math.sqrt((a * a * a) / mu);
-  // départ au périastre (on monte) ou à l'apoastre (on descend)
-  return outward ? { tof: timeFromPeri(nu), dnu: nu } : { tof: T / 2 - timeFromPeri(nu), dnu: PI - nu };
-}
-
-// transfert vers un astre voisin (même parent), ex : Terre → Mars
-function legAcross(ctx, B, rt, nodes) {
-  const C = ctx.s.ref;
-  const P = C.parentBody;
-  const rC = C.orbitRadius;
-  const rB = B.orbitRadius;
-  const vC = C.orbitSpeed * rC;
-  // vitesse d'excès : celle de Hohmann, mais au moins une fraction de la
-  // vitesse de libération au bord de la sphère d'influence — sinon le
-  // vaisseau s'attarde à sa lisière et risque d'y croiser un satellite
-  const hohmann = vC * (Math.sqrt((2 * rB) / (rC + rB)) - 1);
-  const minVinf = 0.6 * Math.sqrt((2 * C.mu) / C.soi);
-  const vinf = Math.sign(hohmann) * Math.max(Math.abs(hohmann), minVinf);
-  const geo = transferGeometry(P.mu, rC, vC + vinf, rB);
-  if (!geo) throw new PlanError(`${B.name} hors d'atteinte.`);
-
-  // durée d'évasion estimée, puis fenêtre de tir : à l'arrivée (tof plus
-  // tard), B doit se trouver dnu plus loin que le point de sortie de C
-  const trial = escapeBurn(ctx, vinf);
-  const tEsc = trial.tExit - ctx.t;
-  const rate = B.orbitSpeed - C.orbitSpeed;
-  const g = (t) => B.phase0 + B.orbitSpeed * (t + geo.tof) - (C.phase0 + C.orbitSpeed * t) - geo.dnu;
-  const earliest = ctx.t + tEsc + 5;
-  const tw = earliest + (rate > 0 ? mod(-g(earliest), TWO_PI) : mod(g(earliest), TWO_PI)) / Math.abs(rate);
-
-  const esc = escapeBurn(ctx, vinf, tw);
-  nodes.push(esc.node);
-
-  const mcc = runCtx(cloneCtx(esc.ctx), esc.tExit + 5);
-  const horizon = 1.5 * geo.tof + 200;
-  const objective = (cc) => signedApproach(cc, B, cc.t + horizon).signed - rt;
-  const c = correctTrajectory(mcc, objective, Math.max(3, Math.abs(vinf)), Math.max(2, 0.03 * rt), nodes);
-  const approach = signedApproach(c, B, c.t + horizon);
-  return circularize(c, approach.t, nodes, 0);
-}
-
-// étapes du trajet dans l'arbre des astres, de C vers B
-function routeLegs(C, B) {
-  const legs = [];
-  let lca = C;
-  while (!isAncestorOrSelf(lca, B)) lca = lca.parentBody;
-
-  let cur = C;
-  if (B === lca) {
-    while (cur !== B) {
-      legs.push({ type: "up", to: cur.parentBody });
-      cur = cur.parentBody;
-    }
-    return legs;
-  }
-  const down = [];
-  for (let b = B; b !== lca; b = b.parentBody) down.unshift(b);
-  while (cur !== lca && cur.parentBody !== lca) {
-    legs.push({ type: "up", to: cur.parentBody });
-    cur = cur.parentBody;
-  }
-  if (cur === lca) legs.push({ type: "down", to: down[0] });
-  else legs.push({ type: "across", to: down[0] });
-  for (let i = 1; i < down.length; i++) legs.push({ type: "down", to: down[i] });
-  return legs;
-}
-
-function planRoute(ship, t, target, altitude) {
-  if (ship.crashed) throw new PlanError("Vaisseau détruit — [R] pour relancer.");
-  const rt = target.radius + altitude;
-  if (altitude < 10) throw new PlanError("Altitude trop basse (minimum 10).");
-  if (rt > maxOrbitRadius(target)) {
-    throw new PlanError(`Altitude trop haute pour ${target.name} (max ${Math.floor(maxOrbitRadius(target) - target.radius)}).`);
-  }
-
-  const nodes = [];
-  let ctx = makeCtx(ship, t, null);
-  const home = ctx.s.ref;
-  if (ctx.s.landed) ctx = legLaunch(ctx, home === target ? rt : parkingRadius(home), nodes);
-  else ctx = legStabilize(ctx, nodes);
-
-  const legs = routeLegs(ctx.s.ref, target);
-  if (!legs.length) ctx = legAltitude(ctx, rt, nodes);
-  else if (Math.hypot(ctx.s.rx, ctx.s.ry) < parkingRadius(ctx.s.ref) * 0.9) {
-    // orbite trop basse pour un départ propre : remonte à l'orbite de parking
-    ctx = legAltitude(ctx, parkingRadius(ctx.s.ref), nodes);
-  }
-  legs.forEach((leg, i) => {
-    const r = i === legs.length - 1 ? rt : parkingRadius(leg.to);
-    if (leg.type === "up") ctx = legUp(ctx, r, nodes);
-    else if (leg.type === "down") ctx = legDown(ctx, leg.to, r, nodes);
-    else ctx = legAcross(ctx, leg.to, r, nodes);
-    if (ctx.s.ref !== leg.to) throw new PlanError(`Capture autour de ${leg.to.name} manquée.`);
-  });
-  return { nodes, final: ctx };
-}
-
 // numérote les manœuvres qui entrent dans le plan (le calculateur de route
 // les produit sans identifiant)
 function withIds(world, nodes) {
   return nodes.map((n) => ({ ...copyNode(n), id: world.nextNodeId++ }));
 }
 
-function computeRoute(world, view, targetId, altitude) {
+// calcule la route vers un astre et la met dans le plan
+function routeTo(world, view, targetId, altitude) {
   const target = bodyById[targetId];
   const ship = world.ship;
   try {
-    const { nodes, final } = planRoute(ship, world.time, target, altitude);
-    world.plan.nodes = withIds(world, nodes);
+    const route = computeRoute(ship, world.time, target, altitude);
+    world.plan.nodes = withIds(world, route.nodes);
     world.plan.target = { body: target, radius: target.radius + altitude };
     world.plan.dirty = true;
     view.selectedNodeId = null;
-    const dv = nodes.reduce((sum, n) => sum + n.power * n.duration * THRUST_ACCEL, 0);
-    const el = orbitElements(final.s);
     view.routeMessage = {
       text:
-        `${nodes.length} manœuvres · Δv ${dv.toFixed(0)} (carburant ${ship.fuel.toFixed(0)})\n` +
-        `Arrivée ${formatT(final.t, world.time)} · orbite ${(el.periapsis - target.radius).toFixed(0)}–${(el.apoapsis - target.radius).toFixed(0)}` +
-        (dv > ship.fuel ? "\n⚠ Carburant insuffisant pour tout le plan" : ""),
-      error: dv > ship.fuel,
+        `${route.nodes.length} manœuvres · Δv ${route.dv.toFixed(0)} (carburant ${ship.fuel.toFixed(0)})\n` +
+        `Arrivée ${formatT(route.final.t, world.time)} · orbite ${route.periapsis.toFixed(0)}–${route.apoapsis.toFixed(0)}` +
+        (route.dv > ship.fuel ? "\n⚠ Carburant insuffisant pour tout le plan" : ""),
+      error: route.dv > ship.fuel,
     };
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
@@ -1257,24 +375,6 @@ function circularizeOrbit(world, view) {
   addNodes(world, view, [node]);
 }
 
-// séquence d'atterrissage : poussée qui annule la vitesse relative au temps
-// deorbitT (chute verticale, sans dérive latérale puisque le moment
-// cinétique devient nul), puis atterrissage guidé. Partagée par planLanding
-// (déorbite immédiatement) et planLandingAt (déorbite au moment trouvé par
-// recherche pour viser un point précis).
-function landingSequence(ctx, deorbitT) {
-  const c0 = deorbitT > ctx.t + 1e-6 ? runCtx(cloneCtx(ctx), deorbitT) : cloneCtx(ctx);
-  const nodes = [];
-  const deorbit = makeBurnNode(c0, c0.t, (s) => ({ x: -s.rvx, y: -s.rvy }));
-  let c = deorbit ? commitNode(c0, deorbit, nodes) : c0;
-  const land = { kind: "land", t: c.t, heading: 0, power: 1, duration: 0 };
-  c = cloneCtx(c);
-  c.ap.nodes.push(copyNode(land));
-  nodes.push(land);
-  runCtx(c, c.t + LANDING_TIMEOUT, (cc) => !planDone(cc));
-  return { c, nodes };
-}
-
 function commitLanding(world, view, nodes, c, before, body) {
   addNodes(world, view, nodes);
   view.routeMessage = {
@@ -1283,94 +383,27 @@ function commitLanding(world, view, nodes, c, before, body) {
   };
 }
 
-function checkLandingPossible(ctx, body) {
-  if (ctx.s.crashed) throw new PlanError("Le plan actuel se termine par un crash.");
-  if (ctx.s.landed) throw new PlanError(`Déjà posé sur ${body.name} à la fin du plan.`);
-  if (!body.parentBody) throw new PlanError(`Impossible de se poser sur ${body.name}.`);
-  if (body.mu / (body.radius * body.radius) > LANDING_IGNITION * THRUST_ACCEL) {
-    throw new PlanError(`Gravité de ${body.name} trop forte pour le moteur.`);
-  }
-}
-
 // ajoute, après les manœuvres déjà prévues, un atterrissage sur l'astre
 // autour duquel le vaisseau se trouve alors, dès que possible
 function planLanding(world, view) {
   if (world.mode !== "planning" || world.ship.crashed) return;
-  const ctx = planEnd(world);
-  const body = ctx.s.ref;
+  const base = planEnd(world);
   try {
-    checkLandingPossible(ctx, body);
-    const { c, nodes } = landingSequence(ctx, ctx.t);
-    if (!c.s.landed || c.s.ref !== body) throw new PlanError(`L'atterrissage sur ${body.name} échoue (crash ou carburant).`);
-    commitLanding(world, view, nodes, c, ctx, body);
+    const { c, nodes, body } = landAsap(base);
+    commitLanding(world, view, nodes, c, base, body);
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
     view.routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage.", error: true };
   }
 }
 
-// vise un point précis de la surface (angle en degrés, 0-359°) : cherche le
-// moment du déorbitage qui y fait atterrir. Sans poussée latérale, la chute
-// est purement radiale (moment cinétique nul) : l'angle d'atterrissage ne
-// dépend que du moment du déorbitage, en croissant de façon monotone (mais
-// pas forcément uniforme, la rotation préalable du vaisseau vers le
-// rétrograde prenant un temps variable) sur une période orbitale complète —
-// il passe donc par la cible exactement une fois. Balayage grossier pour
-// repérer ce passage, puis dichotomie pour l'affiner.
+// atterrissage visant un point précis de la surface (angle en degrés)
 function planLandingAt(world, view, targetAngleDeg) {
   if (world.mode !== "planning" || world.ship.crashed) return;
   const base = planEnd(world);
-  const body = base.s.ref;
   try {
-    checkLandingPossible(base, body);
-    const el = orbitElements(base.s);
-    if (!el.bound || el.apoapsis >= body.soi) throw new PlanError("Orbite non liée : impossible de viser un point précis.");
-
-    const target = radians(((targetAngleDeg % 360) + 360) % 360);
-    const attempt = (t) => {
-      const { c, nodes } = landingSequence(base, t);
-      if (!c.s.landed || c.s.ref !== body) return null;
-      return { c, nodes, err: angleDiff(c.s.landedAngle, target) };
-    };
-
-    // un vrai passage par la cible change le signe de err en le faisant
-    // tendre vers 0 (somme des amplitudes petite) ; un saut de +180° à -180°
-    // (habillage de l'angle) change aussi le signe mais sans s'approcher de
-    // 0 (somme des amplitudes proche de 360°) — à ne pas confondre
-    const isCrossing = (a, b) => Math.sign(a.err) !== Math.sign(b.err) && Math.abs(a.err) + Math.abs(b.err) < PI;
-
-    const SCAN_STEPS = 16;
-    let lo = base.t;
-    let loTry = attempt(lo);
-    if (!loTry) throw new PlanError(`L'atterrissage sur ${body.name} échoue (crash ou carburant) près de cette visée.`);
-    let hi, hiTry;
-    for (let i = 1; i <= SCAN_STEPS; i++) {
-      hi = base.t + (i / SCAN_STEPS) * el.period;
-      hiTry = attempt(hi);
-      if (hiTry && isCrossing(loTry, hiTry)) break;
-      lo = hi;
-      loTry = hiTry || loTry;
-    }
-    if (!hiTry || !isCrossing(loTry, hiTry)) {
-      throw new PlanError("Impossible de viser ce point sur l'orbite actuelle.");
-    }
-    for (let i = 0; i < 18; i++) {
-      const mid = (lo + hi) / 2;
-      const midTry = attempt(mid);
-      if (!midTry) break;
-      if (Math.sign(midTry.err) === Math.sign(loTry.err)) {
-        lo = mid;
-        loTry = midTry;
-      } else {
-        hi = mid;
-        hiTry = midTry;
-      }
-    }
-    const result = Math.abs(loTry.err) < Math.abs(hiTry.err) ? loTry : hiTry;
-    if (Math.abs(result.err) >= radians(2)) {
-      throw new PlanError(`Visée imprécise (écart ${degrees(Math.abs(result.err)).toFixed(0)}°).`);
-    }
-    commitLanding(world, view, result.nodes, result.c, base, body);
+    const { c, nodes, body } = findLandingAt(base, targetAngleDeg);
+    commitLanding(world, view, nodes, c, base, body);
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
     view.routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage visé.", error: true };
@@ -1613,7 +646,7 @@ function setupUI(app) {
     ui.route.disabled = true;
     // laisse le navigateur afficher le message avant le calcul
     setTimeout(() => {
-      computeRoute(app.world, app.view, ui.target.value, Number(ui.altitude.value));
+      routeTo(app.world, app.view, ui.target.value, Number(ui.altitude.value));
       syncPanel(app.world, app.view);
       ui.route.disabled = false;
     }, 30);
@@ -2256,24 +1289,6 @@ if (typeof window !== "undefined") {
   Object.assign(window, { setup, draw, windowResized, keyPressed, mousePressed, mouseDragged, mouseReleased, mouseWheel });
 }
 
-// exports pour les tests : logique de jeu (golden-master, en attendant son
-// extraction dans plan/ et autopilot/) et état de l'application (contrôles
-// de rendu pilotés depuis un navigateur)
-export {
-  PLAN_MAX_HORIZON,
-  advanceSimulation,
-  app,
-  createView,
-  displayPosition,
-  readManualControl,
-  createAutopilot,
-  createWorld,
-  landingSequence,
-  legLaunch,
-  makeCtx,
-  parkingRadius,
-  planDone,
-  planRoute,
-  predictPath,
-  runCtx,
-};
+// état de l'application et boucle de jeu, pour piloter le rendu depuis un
+// navigateur dans les contrôles de non-régression
+export { advanceSimulation, app, createView, createWorld, readManualControl };
