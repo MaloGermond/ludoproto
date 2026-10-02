@@ -1,8 +1,21 @@
 // Scénarios golden-master : chacun rejoue une situation type à pas fixes et
 // renvoie un instantané (manœuvres calculées, échantillons d'état, résumé de
-// la prédiction). Les fonctions s'exécutent dans le contexte du sketch.
+// la prédiction).
+import { COAST, SIM_DT, bodyById, cloneShip, planet, stepShip } from "../src/sim/index.js";
+import {
+  PLAN_MAX_HORIZON,
+  createAutopilot,
+  createWorld,
+  landingSequence,
+  legLaunch,
+  makeCtx,
+  parkingRadius,
+  planDone,
+  planRoute,
+  predictPath,
+  runCtx,
+} from "../sketch.js";
 
-// utilitaires injectés dans le contexte du sketch
 function sampleShip(s, t) {
   return [t, s.ref.id, s.rx, s.ry, s.rvx, s.rvy, s.angle, s.angularVelocity, s.fuel, s.heat, s.landed, s.crashed];
 }
@@ -43,7 +56,7 @@ function runPlan(world, nodes, extra, every) {
   return { nodes: nodeSummary(nodes), samples, prediction: predictionSummary(pred) };
 }
 
-const SCENARIOS = {
+export const SCENARIOS = {
   // pilotage manuel : poussée, virage, poussée, puis vol libre (atmosphère
   // terrestre, assistance au cap, retombée)
   decollage() {
@@ -95,6 +108,3 @@ const SCENARIOS = {
   },
 };
 
-const HELPERS = [sampleShip, nodeSummary, predictionSummary, runPlan];
-
-module.exports = { SCENARIOS, HELPERS };

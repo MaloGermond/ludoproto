@@ -14,55 +14,40 @@
 // dans celle du parent, en entrant dans celle d'un satellite il passe dans
 // celle-ci. Les orbites restent ainsi stables et prévisibles.
 
-const G = 800; // constante de gravité (échelle jeu, pas la vraie valeur)
+import {
+  ALL_BODIES,
+  AUTOPILOT_SLEW_RATE,
+  COAST,
+  FUEL_MAX,
+  HALF_PI,
+  HEAT_MAX,
+  PI,
+  ROTATION_TAP_UNIT,
+  SHIP_SIZE,
+  SIM_DT,
+  THRUST_ACCEL,
+  TWO_PI,
+  angleDiff,
+  bodies,
+  bodyById,
+  bodyPositionAt,
+  bodyVelocityAt,
+  cloneShip,
+  constrain,
+  createShip,
+  degrees,
+  isAncestorOrSelf,
+  localOrbit,
+  orbitElements,
+  progradeAngle,
+  radians,
+  stepShip,
+  sun,
+  syncShipAbsolute,
+} from "./src/sim/index.js";
 
-// horloge de jeu : la simulation avance par pas fixes, exactement comme la
-// prédiction. Le plan exécuté suit donc au pas près le tracé planifié.
-const SIM_DT = 1 / 60;
 const MAX_FRAME_DT = 0.25; // évite une avalanche de pas après un onglet en arrière-plan
 const WARP_LEVELS = [1, 2, 5, 10, 25, 50, 100]; // accélération du temps
-
-const SHIP_SIZE = 14;
-const THRUST_ACCEL = 45; // accélération à pleine puissance
-const LANDED_ROTATION_SPEED = 3.6; // rad/s — rotation au sol, sans inertie
-
-// carburant exprimé en Δv : chaque seconde de poussée à pleine puissance
-// consomme THRUST_ACCEL unités. Réservoir vide = plus de poussée.
-const FUEL_MAX = 500;
-
-// atterrissage : sans danger si le vaisseau touche par l'arrière (nez vers
-// l'extérieur), à une vitesse d'impact raisonnable — sinon c'est un crash.
-const LANDING_MAX_ANGLE = (45 * Math.PI) / 180;
-const LANDING_MAX_SPEED = 120;
-
-// atmosphère : seuls certains astres en ont une (cf. BODY_CONFIGS, champ
-// `atmosphere`). Densité décroissante avec l'altitude (échelle = hauteur/5,
-// approximation d'une vraie atmosphère) ; parkingRadius() tient compte de la
-// hauteur pour qu'une orbite de parking normale reste au-dessus, mais une
-// orbite basse ou un passage au ras du sol la traversent franchement. Elle
-// freine (traînée en v²) et échauffe (flux en v³) le vaisseau ; au-delà de
-// HEAT_MAX, il se consume.
-const DRAG_COEFF = 0.0035; // accél. de freinage = DRAG_COEFF × densité × vitesse²
-const HEAT_RATE = 0.00004; // gain de chaleur/s = HEAT_RATE × densité × vitesse³
-const HEAT_COOLING = 3; // perte de chaleur/s par rayonnement, même hors atmosphère
-const HEAT_MAX = 100;
-
-// rotation façon RCS spatial : maintenir ←/→ accélère en continu la vitesse
-// angulaire, un tapotement bref ne fait qu'un petit ajustement. Sans
-// frottement, la vitesse angulaire persiste jusqu'à ce qu'on la contre.
-const ROTATION_ACCEL = 1.5; // rad/s² pendant que la touche est maintenue
-const ROTATION_TAP_UNIT = 0.15; // rad/s ≈ un tapotement bref — unité d'affichage des "coups"
-
-// assistance au cap : si le vaisseau tourne très lentement et se trouve déjà
-// près d'un cap remarquable (prograde/rétrograde/perpendiculaire à la
-// vitesse), il s'y accroche automatiquement.
-const SNAP_ANGULAR_VELOCITY = 0.05; // rad/s — rotation quasi nulle
-const SNAP_ANGLE_TOLERANCE = 0.1; // rad — proximité requise pour accrocher
-const SNAP_PULL = 0.08; // fraction de l'écart corrigée par frame (effet doux)
-
-// pilote automatique : pivote à vitesse constante vers le cap de la
-// manœuvre. Ce temps de rotation retarde d'autant le début de la poussée.
-const AUTOPILOT_SLEW_RATE = 1.2; // rad/s
 
 // atterrissage guidé : le moteur s'allume quand la décélération nécessaire
 // pour s'arrêter au sol atteint cette fraction de la poussée maximale
@@ -86,8 +71,6 @@ const NODE_HIT_RADIUS = 12; // px — distance max d'un clic à un point existan
 const CLICK_MAX_MOVE = 5; // px — au-delà, le geste est un glisser (déplacement de vue)
 const DEFAULT_NODE = { heading: 0, power: 1, duration: 1 };
 
-const COAST = { left: false, right: false, thrust: 0, slewTo: null, assist: false };
-
 const PHASE_STYLES = {
   coast: { color: [130, 255, 170, 180], weight: 1.5, dashed: true },
   rotate: { color: [255, 230, 120, 220], weight: 2.5, dashed: false },
@@ -95,110 +78,11 @@ const PHASE_STYLES = {
 };
 
 // ---------------------------------------------------------------------------
-// Système solaire — configuration déclarative. Pour ajouter un astre,
-// ajouter une entrée ; pour en retirer un, supprimer l'entrée ou mettre
-// `enabled: false`. `parent` référence l'id de l'astre autour duquel il
-// orbite (null pour l'astre central, fixe). `phase` : position de départ sur
-// l'orbite, en degrés. La vitesse orbitale découle de la loi de Kepler.
-//
-// Espacements et masses choisis pour que les sphères d'influence ne se
-// chevauchent pas (vérifié au chargement) et laissent de la place autour de
-// chaque astre pour y orbiter.
-// ---------------------------------------------------------------------------
-
-// Masses choisies pour que la gravité de surface (g = G·masse/rayon²) varie
-// vraiment d'un astre à l'autre, à l'image des écarts réels (une planète
-// tellurique dense tire fort, une petite lune est quasi flottante) — avant
-// cette passe, masse et rayon avaient été choisis en proportion l'un de
-// l'autre pour l'espacement des sphères d'influence, ce qui aplatissait
-// g à peu près au même niveau partout. Les géantes gazeuses gardent leur
-// masse d'origine : la grossir pour coller à leur vraie gravité ferait
-// déborder leur sphère d'influence sur l'orbite de Mars (cf. essais).
-const BODY_CONFIGS = [
-  { id: "sun", name: "Soleil", parent: null, radius: 900, mass: 40000, color: [255, 210, 90] },
-  { id: "mercury", name: "Mercure", parent: "sun", orbitRadius: 3500, phase: 200, radius: 50, mass: 35, color: [180, 170, 160] },
-  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 750, color: [230, 200, 140], atmosphere: { height: 130, density: 2.2, color: [235, 210, 150] } },
-  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200], atmosphere: { height: 150, density: 1, color: [150, 190, 255] } },
-  { id: "moon", name: "Lune", parent: "earth", orbitRadius: 2200, phase: 60, radius: 60, mass: 22, color: [180, 180, 180] },
-  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 200, color: [210, 120, 80], atmosphere: { height: 75, density: 0.4, color: [220, 160, 120] } },
-  { id: "phobos", name: "Phobos", parent: "mars", orbitRadius: 500, phase: 30, radius: 15, mass: 1, color: [140, 130, 120] },
-  { id: "deimos", name: "Déimos", parent: "mars", orbitRadius: 1000, phase: 210, radius: 12, mass: 1, color: [150, 140, 130] },
-  { id: "jupiter", name: "Jupiter", parent: "sun", orbitRadius: 36000, phase: 250, radius: 500, mass: 3000, color: [220, 180, 140] },
-  { id: "io", name: "Io", parent: "jupiter", orbitRadius: 1900, phase: 0, radius: 45, mass: 14, color: [230, 210, 120] },
-  { id: "europa", name: "Europe", parent: "jupiter", orbitRadius: 3600, phase: 90, radius: 40, mass: 8, color: [210, 200, 190] },
-  { id: "ganymede", name: "Ganymède", parent: "jupiter", orbitRadius: 6500, phase: 180, radius: 55, mass: 16, color: [160, 150, 140] },
-  { id: "callisto", name: "Callisto", parent: "jupiter", orbitRadius: 10500, phase: 270, radius: 50, mass: 12, color: [120, 110, 100] },
-  { id: "saturn", name: "Saturne", parent: "sun", orbitRadius: 68000, phase: 320, radius: 420, mass: 1500, color: [230, 210, 160] },
-  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 22, color: [220, 180, 110], atmosphere: { height: 65, density: 1.3, color: [210, 160, 90] } },
-  { id: "uranus", name: "Uranus", parent: "sun", orbitRadius: 108000, phase: 30, radius: 260, mass: 600, color: [160, 220, 230] },
-  { id: "titania", name: "Titania", parent: "uranus", orbitRadius: 5500, phase: 120, radius: 35, mass: 2, color: [180, 190, 195] },
-  { id: "neptune", name: "Neptune", parent: "sun", orbitRadius: 160000, phase: 170, radius: 250, mass: 600, color: [100, 140, 230] },
-  // orbite rétrograde (comme dans la réalité) : vitesse de Kepler forcée en négatif
-  { id: "triton", name: "Triton", parent: "neptune", orbitRadius: 6500, orbitSpeed: -0.00132, phase: 80, radius: 40, mass: 5, color: [230, 220, 210] },
-];
-
-const ALL_BODIES = BODY_CONFIGS.filter((c) => c.enabled !== false).map((c) => ({ ...c, x: 0, y: 0, vx: 0, vy: 0, children: [] }));
-const bodyById = Object.fromEntries(ALL_BODIES.map((b) => [b.id, b]));
-for (const b of ALL_BODIES) {
-  b.mu = G * b.mass;
-  b.parentBody = b.parent ? bodyById[b.parent] : null;
-  if (b.atmosphere) b.atmosphere.scaleHeight = b.atmosphere.height / 5;
-}
-for (const b of ALL_BODIES) {
-  if (!b.parentBody) {
-    b.soi = Infinity;
-    continue;
-  }
-  b.parentBody.children.push(b);
-  b.orbitSpeed = b.orbitSpeed ?? Math.sqrt(b.parentBody.mu / Math.pow(b.orbitRadius, 3));
-  b.phase0 = ((b.phase || 0) * Math.PI) / 180;
-  // sphère d'influence par rapport au parent (formule patched-conics)
-  b.soi = b.orbitRadius * Math.pow(b.mass / b.parentBody.mass, 2 / 5);
-}
-// avertit si deux sphères d'influence voisines se chevauchent
-for (const b of ALL_BODIES) {
-  const kids = [...b.children].sort((a, c) => a.orbitRadius - c.orbitRadius);
-  for (let i = 1; i < kids.length; i++) {
-    if (kids[i - 1].orbitRadius + kids[i - 1].soi > kids[i].orbitRadius - kids[i].soi) {
-      console.warn(`Sphères d'influence qui se chevauchent : ${kids[i - 1].name} / ${kids[i].name}`);
-    }
-  }
-  if (b.parentBody && kids.length && kids[kids.length - 1].orbitRadius + kids[kids.length - 1].soi > b.soi) {
-    console.warn(`${kids[kids.length - 1].name} sort de la sphère d'influence de ${b.name}`);
-  }
-}
-
-const sun = ALL_BODIES.find((b) => !b.parentBody);
-const planet = bodyById.earth; // astre de départ du vaisseau
-
-// ---------------------------------------------------------------------------
 // État du jeu, regroupé en deux objets explicites que les fonctions reçoivent
 // en paramètre (aucune variable d'état globale) :
 // - world : ce qui est simulé ou planifié (vaisseau, temps, mode, plan…) ;
 // - view : la façon de le regarder et de l'éditer (caméra, sélection…).
 // ---------------------------------------------------------------------------
-
-function createShip(t) {
-  const startAngle = -HALF_PI; // sommet de la planète
-  const ship = {
-    ref: planet,
-    rx: Math.cos(startAngle) * (planet.radius + SHIP_SIZE / 2),
-    ry: Math.sin(startAngle) * (planet.radius + SHIP_SIZE / 2),
-    rvx: 0,
-    rvy: 0,
-    angle: startAngle, // nez à l'opposé du centre de la planète, prêt à décoller
-    angularVelocity: 0,
-    size: SHIP_SIZE,
-    crashed: false,
-    landed: true,
-    landedAngle: startAngle,
-    thrusting: false,
-    fuel: FUEL_MAX,
-    heat: 0,
-  };
-  syncShipAbsolute(ship, t);
-  return ship;
-}
 
 function createWorld() {
   const world = {
@@ -257,10 +141,6 @@ function recenterCamera(view, ship) {
 // pour explorer des futurs possibles sans toucher à l'état du jeu
 // ---------------------------------------------------------------------------
 
-function cloneShip(s) {
-  return { ...s };
-}
-
 // kind : undefined pour une manœuvre classique (rotation + poussée fixe),
 // "land" pour un atterrissage guidé
 function copyNode(n) {
@@ -273,278 +153,6 @@ function cloneAutopilot(ap) {
 
 function cloneCtx(c) {
   return { s: cloneShip(c.s), t: c.t, ap: c.ap ? cloneAutopilot(c.ap) : null };
-}
-
-// ---------------------------------------------------------------------------
-// Astres : positions en fonction du temps de jeu (orbites circulaires "sur
-// rails", comme dans KSP)
-// ---------------------------------------------------------------------------
-
-// position/vitesse d'un astre relativement à son parent
-function localOrbit(body, t) {
-  const a = body.phase0 + body.orbitSpeed * t;
-  const c = Math.cos(a);
-  const s = Math.sin(a);
-  const r = body.orbitRadius;
-  const w = body.orbitSpeed;
-  return { x: r * c, y: r * s, vx: -r * w * s, vy: r * w * c };
-}
-
-function bodyPositionAt(body, t) {
-  if (!body.parentBody) return { x: 0, y: 0 };
-  const p = bodyPositionAt(body.parentBody, t);
-  const o = localOrbit(body, t);
-  return { x: p.x + o.x, y: p.y + o.y };
-}
-
-function bodyVelocityAt(body, t) {
-  if (!body.parentBody) return { vx: 0, vy: 0 };
-  const p = bodyVelocityAt(body.parentBody, t);
-  const o = localOrbit(body, t);
-  return { vx: p.vx + o.vx, vy: p.vy + o.vy };
-}
-
-// met à jour la position/vitesse affichée de chaque astre à l'instant t
-function bodies(t) {
-  for (const body of ALL_BODIES) {
-    const pos = bodyPositionAt(body, t);
-    const vel = bodyVelocityAt(body, t);
-    body.x = pos.x;
-    body.y = pos.y;
-    body.vx = vel.vx;
-    body.vy = vel.vy;
-  }
-  return ALL_BODIES;
-}
-
-function isAncestorOrSelf(ancestor, body) {
-  for (let b = body; b; b = b.parentBody) if (b === ancestor) return true;
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Physique du vaisseau — partagée par la simulation et la prédiction.
-// État relatif à l'astre de référence `ref` : rx, ry, rvx, rvy.
-// ---------------------------------------------------------------------------
-
-function angleDiff(from, to) {
-  let d = (to - from) % TWO_PI;
-  if (d > PI) d -= TWO_PI;
-  if (d < -PI) d += TWO_PI;
-  return d;
-}
-
-function slewToward(angle, target, maxStep) {
-  const d = angleDiff(angle, target);
-  if (Math.abs(d) <= maxStep) return target;
-  return angle + Math.sign(d) * maxStep;
-}
-
-// position/vitesse absolues (affichage, caméra)
-function syncShipAbsolute(s, t) {
-  const p = bodyPositionAt(s.ref, t);
-  const v = bodyVelocityAt(s.ref, t);
-  s.x = p.x + s.rx;
-  s.y = p.y + s.ry;
-  s.vx = v.vx + s.rvx;
-  s.vy = v.vy + s.rvy;
-}
-
-// changement de sphère d'influence à l'instant t
-function updateSphereOfInfluence(s, t) {
-  const R = s.ref;
-  if (R.parentBody && s.rx * s.rx + s.ry * s.ry > R.soi * R.soi) {
-    const o = localOrbit(R, t);
-    s.rx += o.x;
-    s.ry += o.y;
-    s.rvx += o.vx;
-    s.rvy += o.vy;
-    s.ref = R.parentBody;
-    return;
-  }
-  for (const child of R.children) {
-    const o = localOrbit(child, t);
-    const dx = s.rx - o.x;
-    const dy = s.ry - o.y;
-    if (dx * dx + dy * dy < child.soi * child.soi) {
-      s.rx = dx;
-      s.ry = dy;
-      s.rvx -= o.vx;
-      s.rvy -= o.vy;
-      s.ref = child;
-      return;
-    }
-  }
-}
-
-// avance l'état `s` du vaisseau d'un pas `dt` à partir de l'instant `t`.
-// `control` : { left, right, thrust (0..1), slewTo (cap visé ou null), assist }
-function stepShip(s, t, dt, control) {
-  if (s.crashed) return;
-  const R = s.ref;
-
-  if (s.landed) {
-    const h = R.radius + SHIP_SIZE / 2;
-    s.rx = Math.cos(s.landedAngle) * h;
-    s.ry = Math.sin(s.landedAngle) * h;
-    s.rvx = 0; // posé : le vaisseau se déplace avec l'astre
-    s.rvy = 0;
-    s.thrusting = false;
-
-    if (control.slewTo !== null) {
-      s.angle = slewToward(s.angle, control.slewTo, AUTOPILOT_SLEW_RATE * dt);
-    } else {
-      if (control.left) s.angle -= LANDED_ROTATION_SPEED * dt;
-      if (control.right) s.angle += LANDED_ROTATION_SPEED * dt;
-    }
-
-    if (!(control.thrust > 0) || s.fuel <= 0) return; // reste posé tant qu'on ne pousse pas
-    s.landed = false; // décollage
-  }
-
-  if (control.slewTo !== null) {
-    // pilote automatique : rotation à vitesse constante vers le cap du plan,
-    // l'inertie de rotation est annulée
-    s.angularVelocity = 0;
-    s.angle = slewToward(s.angle, control.slewTo, AUTOPILOT_SLEW_RATE * dt);
-  } else {
-    // rotation manuelle : maintenir accélère en continu, sans frottement —
-    // la vitesse angulaire persiste tant qu'on ne la contre pas
-    if (control.left) s.angularVelocity -= ROTATION_ACCEL * dt;
-    if (control.right) s.angularVelocity += ROTATION_ACCEL * dt;
-
-    // stabilise automatiquement un résidu de rotation quasi nul une fois les
-    // touches relâchées : évite d'avoir à tomber pile sur zéro au minutage près
-    if (!control.left && !control.right && Math.abs(s.angularVelocity) < SNAP_ANGULAR_VELOCITY) {
-      s.angularVelocity = 0;
-    }
-
-    s.angle += s.angularVelocity * dt;
-
-    // assistance au cap : rotation quasi nulle + déjà proche d'un cap
-    // remarquable (prograde/rétrograde/perpendiculaire) → accroche dessus.
-    // Désactivée tant qu'on maintient une touche, pour ne jamais "rattraper"
-    // une rotation volontaire et bloquer le vaisseau.
-    if (control.assist && !control.left && !control.right && Math.abs(s.angularVelocity) < SNAP_ANGULAR_VELOCITY) {
-      if (Math.hypot(s.rvx, s.rvy) > 1) {
-        const velocityAngle = Math.atan2(s.rvy, s.rvx);
-        const candidates = [velocityAngle, velocityAngle + PI, velocityAngle - HALF_PI, velocityAngle + HALF_PI];
-        for (const target of candidates) {
-          const diff = angleDiff(s.angle, target);
-          if (Math.abs(diff) < SNAP_ANGLE_TOLERANCE) {
-            // attraction douce vers le cap plutôt qu'un saut brutal
-            s.angle += diff * SNAP_PULL;
-            s.angularVelocity = 0;
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // gravité de l'astre de référence uniquement (patched conics)
-  const r2 = s.rx * s.rx + s.ry * s.ry;
-  const r = Math.sqrt(r2) || 1;
-  const g = R.mu / r2;
-  let ax = (-g * s.rx) / r;
-  let ay = (-g * s.ry) / r;
-
-  // poussée directionnelle, limitée par le carburant restant
-  let thrust = control.thrust > 0 ? control.thrust : 0;
-  if (thrust > 0) {
-    const cost = thrust * THRUST_ACCEL * dt;
-    if (cost > s.fuel) thrust *= s.fuel / cost;
-    s.fuel = Math.max(0, s.fuel - thrust * THRUST_ACCEL * dt);
-    ax += Math.cos(s.angle) * THRUST_ACCEL * thrust;
-    ay += Math.sin(s.angle) * THRUST_ACCEL * thrust;
-  }
-  s.thrusting = thrust > 0;
-
-  // atmosphère : freinage (traînée en v²) et échauffement (flux en v³),
-  // tous deux proportionnels à la densité locale (décroissance exponentielle
-  // avec l'altitude). Hors atmosphère (ou astre sans atmosphère), la jauge
-  // de chaleur ne fait que se refroidir.
-  const altitude = r - R.radius;
-  const density = R.atmosphere && altitude < R.atmosphere.height ? R.atmosphere.density * Math.exp(-Math.max(0, altitude) / R.atmosphere.scaleHeight) : 0;
-  if (density > 0) {
-    const speed = Math.hypot(s.rvx, s.rvy) || 1e-6;
-    const drag = DRAG_COEFF * density * speed * speed;
-    ax -= (drag * s.rvx) / speed;
-    ay -= (drag * s.rvy) / speed;
-    s.heat += (HEAT_RATE * density * speed * speed * speed - HEAT_COOLING) * dt;
-  } else {
-    s.heat -= HEAT_COOLING * dt;
-  }
-  s.heat = Math.max(0, s.heat);
-  if (s.heat >= HEAT_MAX) {
-    s.crashed = true;
-    s.crashReason = "chaleur";
-    return;
-  }
-
-  s.rvx += ax * dt;
-  s.rvy += ay * dt;
-  s.rx += s.rvx * dt;
-  s.ry += s.rvy * dt;
-
-  // collision avec l'astre de référence
-  const d = Math.hypot(s.rx, s.ry);
-  if (d < R.radius + SHIP_SIZE / 2) {
-    const outwardAngle = Math.atan2(s.ry, s.rx);
-    const tilt = Math.abs(angleDiff(s.angle, outwardAngle));
-    const impactSpeed = Math.hypot(s.rvx, s.rvy); // relative à l'astre
-
-    if (tilt <= LANDING_MAX_ANGLE && impactSpeed <= LANDING_MAX_SPEED) {
-      // touche par l'arrière, à vitesse raisonnable : atterrissage réussi
-      s.landed = true;
-      s.landedAngle = outwardAngle;
-      s.angle = outwardAngle;
-      s.rx = Math.cos(outwardAngle) * (R.radius + SHIP_SIZE / 2);
-      s.ry = Math.sin(outwardAngle) * (R.radius + SHIP_SIZE / 2);
-      s.rvx = 0;
-      s.rvy = 0;
-      s.angularVelocity = 0;
-    } else {
-      s.crashed = true;
-    }
-    return;
-  }
-
-  updateSphereOfInfluence(s, t + dt);
-}
-
-// direction du prograde (vitesse relative à l'astre de référence) ; posé au
-// sol, c'est la verticale locale
-function progradeAngle(s) {
-  const radial = Math.atan2(s.ry, s.rx);
-  if (s.landed) return s.landedAngle;
-  if (Math.hypot(s.rvx, s.rvy) < 1) return radial;
-  return Math.atan2(s.rvy, s.rvx);
-}
-
-// éléments de l'orbite képlérienne autour de l'astre de référence
-function orbitElements(s) {
-  const mu = s.ref.mu;
-  const r = Math.hypot(s.rx, s.ry);
-  const v2 = s.rvx * s.rvx + s.rvy * s.rvy;
-  const rv = s.rx * s.rvx + s.ry * s.rvy;
-  const k = v2 - mu / r;
-  const ex = (k * s.rx - rv * s.rvx) / mu;
-  const ey = (k * s.ry - rv * s.rvy) / mu;
-  const e = Math.hypot(ex, ey);
-  const energy = v2 / 2 - mu / r;
-  const bound = energy < 0;
-  const a = bound ? -mu / (2 * energy) : Infinity;
-  return {
-    r,
-    e,
-    a,
-    bound,
-    h: s.rx * s.rvy - s.ry * s.rvx,
-    period: bound ? TWO_PI * Math.sqrt((a * a * a) / mu) : Infinity,
-    periapsis: bound ? a * (1 - e) : r,
-    apoapsis: bound ? a * (1 + e) : Infinity,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2641,3 +2249,31 @@ function drawRotationIndicator(ship, x, y) {
     : "rotation stable";
   text(msg, x, y + notchSize + 4);
 }
+
+// p5 en mode global cherche ses crochets sur window ; un module ES ne les y
+// expose pas tout seul (garde : ce fichier est aussi importé par les tests)
+if (typeof window !== "undefined") {
+  Object.assign(window, { setup, draw, windowResized, keyPressed, mousePressed, mouseDragged, mouseReleased, mouseWheel });
+}
+
+// exports pour les tests : logique de jeu (golden-master, en attendant son
+// extraction dans plan/ et autopilot/) et état de l'application (contrôles
+// de rendu pilotés depuis un navigateur)
+export {
+  PLAN_MAX_HORIZON,
+  advanceSimulation,
+  app,
+  createView,
+  displayPosition,
+  readManualControl,
+  createAutopilot,
+  createWorld,
+  landingSequence,
+  legLaunch,
+  makeCtx,
+  parkingRadius,
+  planDone,
+  planRoute,
+  predictPath,
+  runCtx,
+};

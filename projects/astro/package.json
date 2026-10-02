@@ -2,6 +2,7 @@
   "name": "astro",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "serve . -l 3000",
     "build": "echo \"static sketch, nothing to build\"",
