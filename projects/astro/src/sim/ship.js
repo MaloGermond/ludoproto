@@ -40,9 +40,19 @@ export function createShip(t) {
     thrusting: false,
     fuel: FUEL_MAX,
     heat: 0,
+    mass: 1,
   };
   syncShipAbsolute(ship, t);
   return ship;
+}
+
+// accélération réellement délivrée par le moteur : THRUST_ACCEL est calibré
+// pour une masse de référence 1 (comportement inchangé par défaut) ; un
+// vaisseau plus lourd accélère moins pour la même poussée (F = m·a), freine
+// aussi moins dans l'atmosphère (plus lourd = plus "balistique") et chauffe
+// moins vite (plus d'inertie thermique) pour le même flux.
+export function thrustAccel(s) {
+  return THRUST_ACCEL / s.mass;
 }
 
 export function cloneShip(s) {
@@ -175,15 +185,19 @@ function gravity(s) {
   return { ax: (-g * s.rx) / r, ay: (-g * s.ry) / r, r };
 }
 
-// poussée directionnelle, limitée par le carburant restant
+// poussée directionnelle, limitée par le carburant restant. Le carburant
+// reste un budget de Δv (indépendant de la masse, par définition du Δv) :
+// un vaisseau plus lourd met plus de temps à le dépenser à pleine poussée,
+// mais une manœuvre donnée (Δv requis) lui coûte le même carburant.
 function applyThrust(s, dt, control, acc) {
   let thrust = control.thrust > 0 ? control.thrust : 0;
   if (thrust > 0) {
-    const cost = thrust * THRUST_ACCEL * dt;
+    const accel = thrustAccel(s);
+    const cost = thrust * accel * dt;
     if (cost > s.fuel) thrust *= s.fuel / cost;
-    s.fuel = Math.max(0, s.fuel - thrust * THRUST_ACCEL * dt);
-    acc.ax += Math.cos(s.angle) * THRUST_ACCEL * thrust;
-    acc.ay += Math.sin(s.angle) * THRUST_ACCEL * thrust;
+    s.fuel = Math.max(0, s.fuel - thrust * accel * dt);
+    acc.ax += Math.cos(s.angle) * accel * thrust;
+    acc.ay += Math.sin(s.angle) * accel * thrust;
   }
   s.thrusting = thrust > 0;
 }
@@ -192,17 +206,19 @@ function applyThrust(s, dt, control, acc) {
 // tous deux proportionnels à la densité locale (décroissance exponentielle
 // avec l'altitude). Hors atmosphère (ou astre sans atmosphère), la jauge
 // de chaleur ne fait que se refroidir. Au-delà de HEAT_MAX, le vaisseau se
-// consume.
+// consume. Un vaisseau plus massif encaisse mieux (déjà le cas en vrai :
+// coefficient balistique plus élevé, plus d'inertie thermique) : la
+// décélération et la chauffe sont toutes deux divisées par la masse.
 function applyAtmosphere(s, dt, acc) {
   const R = s.ref;
   const altitude = acc.r - R.radius;
   const density = R.atmosphere && altitude < R.atmosphere.height ? R.atmosphere.density * Math.exp(-Math.max(0, altitude) / R.atmosphere.scaleHeight) : 0;
   if (density > 0) {
     const speed = Math.hypot(s.rvx, s.rvy) || 1e-6;
-    const drag = DRAG_COEFF * density * speed * speed;
+    const drag = (DRAG_COEFF * density * speed * speed) / s.mass;
     acc.ax -= (drag * s.rvx) / speed;
     acc.ay -= (drag * s.rvy) / speed;
-    s.heat += (HEAT_RATE * density * speed * speed * speed - HEAT_COOLING) * dt;
+    s.heat += (HEAT_RATE * density * speed * speed * speed / s.mass - HEAT_COOLING) * dt;
   } else {
     s.heat -= HEAT_COOLING * dt;
   }

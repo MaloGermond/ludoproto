@@ -13,7 +13,7 @@ import {
   orbitElements,
   progradeAngle,
   SIM_DT,
-  THRUST_ACCEL,
+  thrustAccel,
 } from "../sim/index.js";
 import { cloneCtx, planDone, runCtx } from "./context.js";
 
@@ -80,10 +80,11 @@ export function makeBurnNode(ctx, tCenter, dvFn) {
     const m = Math.hypot(dv.x, dv.y);
     if (!(m > 1e-3)) return null;
     const angle = Math.atan2(dv.y, dv.x);
+    const accel = thrustAccel(probe.s);
     // Δv exact : nombre entier de pas, puissance ajustée
-    const steps = Math.max(1, Math.ceil(m / (THRUST_ACCEL * SIM_DT)));
+    const steps = Math.max(1, Math.ceil(m / (accel * SIM_DT)));
     const duration = steps * SIM_DT;
-    const power = m / (steps * THRUST_ACCEL * SIM_DT);
+    const power = m / (steps * accel * SIM_DT);
 
     let start = Math.max(ctx.t, center - duration / 2);
     for (let k = 0; k < 2; k++) {

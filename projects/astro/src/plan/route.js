@@ -13,7 +13,7 @@
 //  5. circularisation au périastre, puis petites corrections.
 // ---------------------------------------------------------------------------
 
-import { isAncestorOrSelf, orbitElements, THRUST_ACCEL } from "../sim/index.js";
+import { isAncestorOrSelf, orbitElements, thrustAccel } from "../sim/index.js";
 import { maxOrbitRadius, parkingRadius, PlanError } from "./burns.js";
 import { makeCtx } from "./context.js";
 import { legAcross, legAltitude, legDown, legLaunch, legStabilize, legUp } from "./legs.js";
@@ -78,7 +78,7 @@ export function planRoute(ship, t, target, altitude) {
 // lève une PlanError si la destination est inaccessible
 export function computeRoute(ship, t, target, altitude) {
   const { nodes, final } = planRoute(ship, t, target, altitude);
-  const dv = nodes.reduce((sum, n) => sum + n.power * n.duration * THRUST_ACCEL, 0);
+  const dv = nodes.reduce((sum, n) => sum + n.power * n.duration * thrustAccel(ship), 0);
   const el = orbitElements(final.s);
   return { nodes, final, dv, periapsis: el.periapsis - target.radius, apoapsis: el.apoapsis - target.radius };
 }

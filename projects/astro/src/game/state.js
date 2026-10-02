@@ -46,6 +46,7 @@ export function createView(world) {
     selectedNodeId: null,
     pointer: null, // geste souris en cours
     routeMessage: { text: "", error: false },
+    showSettings: false, // panneau de configuration (⚙)
   };
 }
 

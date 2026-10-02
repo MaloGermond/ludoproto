@@ -142,14 +142,15 @@ export function drawPlanSummary(world, view, x, y, prediction) {
     text("Aucune manœuvre — cliquez sur le tracé ou choisissez une destination", x, y);
     return;
   }
-  const total = planNodes.reduce((sum, n) => sum + nodeDeltaV(n, prediction && prediction.nodes.find((p) => p.id === n.id)), 0);
+  const total = planNodes.reduce((sum, n) => sum + nodeDeltaV(n, world.ship, prediction && prediction.nodes.find((p) => p.id === n.id)), 0);
   text(`Plan de vol : ${planNodes.length} manœuvres · Δv total ${total.toFixed(0)}`, x, y);
   const maxLines = Math.max(3, Math.floor((height - y - 160) / 18));
   planNodes.slice(0, maxLines).forEach((node, i) => {
     const predicted = prediction && prediction.nodes.find((n) => n.id === node.id);
     const start = predicted && predicted.startT !== undefined ? `${formatT(predicted.startT, world.time)} (${predicted.startRef.name})` : "non atteinte";
-    const burn = node.power > 0 && node.duration > 0 ? `Δv ${nodeDeltaV(node).toFixed(1)}` : "rotation seule";
-    const what = node.kind === "land" ? `atterrissage guidé · Δv ${nodeDeltaV(node, predicted).toFixed(1)}` : `cap ${Math.round(node.heading)}° · ${burn}`;
+    const burn = node.power > 0 && node.duration > 0 ? `Δv ${nodeDeltaV(node, world.ship).toFixed(1)}` : "rotation seule";
+    const what =
+      node.kind === "land" ? `atterrissage guidé · Δv ${nodeDeltaV(node, world.ship, predicted).toFixed(1)}` : `cap ${Math.round(node.heading)}° · ${burn}`;
     fill(node.id === view.selectedNodeId ? [255, 230, 120] : [255, 255, 255, 200]);
     text(`M${i + 1} · ${start} · ${what}`, x, y + 18 + i * 18);
   });

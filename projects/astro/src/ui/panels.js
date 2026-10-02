@@ -38,6 +38,8 @@ export function updateUI(world, view, prediction) {
   ui.camera.textContent = view.cameraFree ? "🎯 Suivre le vaisseau" : "🎥 Caméra libre";
   ui.warp.textContent = `×${WARP_LEVELS[world.warpIndex]}`;
   for (const b of [ui.warp, ui.warpUp, ui.warpDown]) b.hidden = planning;
+  ui.settings.classList.toggle("active", view.showSettings);
+  ui.settingsPanel.hidden = !view.showSettings;
 
   const node = planning ? selectedNode(world, view) : null;
   if (!node) {
@@ -56,7 +58,9 @@ export function updateUI(world, view, prediction) {
   ui.outDuration.textContent = `${node.duration.toFixed(2)} s`;
 
   const predicted = prediction && prediction.nodes.find((n) => n.id === node.id);
-  const lines = [landing ? `Atterrissage guidé · Δv ≈ ${nodeDeltaV(node, predicted).toFixed(1)}` : `Δv ≈ ${nodeDeltaV(node).toFixed(1)}`];
+  const lines = [
+    landing ? `Atterrissage guidé · Δv ≈ ${nodeDeltaV(node, ship, predicted).toFixed(1)}` : `Δv ≈ ${nodeDeltaV(node, ship).toFixed(1)}`,
+  ];
   if (!predicted || predicted.startT === undefined) {
     lines.push("Non atteinte : le tracé s'arrête avant (impact ou horizon).");
   } else {

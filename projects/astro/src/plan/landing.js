@@ -2,7 +2,7 @@
 // verticale), puis atterrissage guidé exécuté par le pilote automatique.
 
 import { copyNode, LANDING_IGNITION } from "../autopilot/index.js";
-import { angleDiff, degrees, orbitElements, PI, radians, THRUST_ACCEL } from "../sim/index.js";
+import { angleDiff, degrees, orbitElements, PI, radians, thrustAccel } from "../sim/index.js";
 import { commitNode, makeBurnNode, PlanError } from "./burns.js";
 import { cloneCtx, planDone, runCtx } from "./context.js";
 
@@ -30,7 +30,7 @@ export function checkLandingPossible(ctx, body) {
   if (ctx.s.crashed) throw new PlanError("Le plan actuel se termine par un crash.");
   if (ctx.s.landed) throw new PlanError(`Déjà posé sur ${body.name} à la fin du plan.`);
   if (!body.parentBody) throw new PlanError(`Impossible de se poser sur ${body.name}.`);
-  if (body.mu / (body.radius * body.radius) > LANDING_IGNITION * THRUST_ACCEL) {
+  if (body.mu / (body.radius * body.radius) > LANDING_IGNITION * thrustAccel(ctx.s)) {
     throw new PlanError(`Gravité de ${body.name} trop forte pour le moteur.`);
   }
 }

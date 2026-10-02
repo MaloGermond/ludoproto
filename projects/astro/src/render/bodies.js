@@ -48,13 +48,20 @@ export function drawOrbits(world, view) {
   pop();
 }
 
+// fond étoilé très lointain : ne doit réagir qu'au panoramique (parallaxe,
+// à peine), pas au zoom. Le décalage caméra doit donc être mis à l'échelle
+// par view.zoom comme le reste de la scène (voir renderScene) — sans ce
+// facteur, le recentrage de la molette (qui déplace cameraX/Y pour garder
+// le point sous le curseur) était pris pour un panoramique et amplifié
+// d'autant plus que le zoom était faible, d'où une dérive nette en dézoom.
+const STAR_PARALLAX = 0.08;
 export function drawStars(view) {
   randomSeed(1);
   noStroke();
   fill(255, 255, 255, 150);
   for (let i = 0; i < 200; i++) {
-    const x = (random(-2000, 2000) - view.cameraX * 0.02) % width;
-    const y = (random(-2000, 2000) - view.cameraY * 0.02) % height;
+    const x = (random(-2000, 2000) - view.cameraX * view.zoom * STAR_PARALLAX) % width;
+    const y = (random(-2000, 2000) - view.cameraY * view.zoom * STAR_PARALLAX) % height;
     circle((x + width) % width, (y + height) % height, 2);
   }
 }

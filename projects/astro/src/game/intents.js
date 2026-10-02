@@ -7,7 +7,7 @@
 
 import { createAutopilot } from "../autopilot/index.js";
 import { layoutPrediction, PLAN_MAX_HORIZON, predictPath } from "../plan/index.js";
-import { constrain, FUEL_MAX } from "../sim/index.js";
+import { constrain, FUEL_MAX, setConstant } from "../sim/index.js";
 import {
   addNodeAt,
   changeWarp,
@@ -136,6 +136,22 @@ const HANDLERS = {
     if (!world.ship.crashed) return;
     resetShip(world);
     recenterCamera(view, world.ship);
+  },
+  toggleSettings: (world, view) => {
+    view.showSettings = !view.showSettings;
+  },
+  // panneau de configuration (⚙) : constantes physiques (liaisons vivantes,
+  // cf. sim/constants.js) et masse du vaisseau — invalide les prédictions
+  // mises en cache, qui sinon continueraient de refléter les anciennes valeurs
+  setConstant: (world, view, { key, value }) => {
+    setConstant(key, value);
+    world.plan.dirty = true;
+    world.flightPredictionDirty = true;
+  },
+  setShipMass: (world, view, { value }) => {
+    world.ship.mass = Math.max(0.1, value);
+    world.plan.dirty = true;
+    world.flightPredictionDirty = true;
   },
 };
 

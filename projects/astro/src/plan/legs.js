@@ -7,7 +7,7 @@ import {
   orbitElements,
   PI,
   SIM_DT,
-  THRUST_ACCEL,
+  thrustAccel,
   TWO_PI,
 } from "../sim/index.js";
 import {
@@ -27,9 +27,10 @@ import { cloneCtx, runCtx } from "./context.js";
 // décollage vertical puis circularisation à l'apogée, au rayon rp
 export function legLaunch(ctx, rp, nodes) {
   const body = ctx.s.ref;
+  const accel = thrustAccel(ctx.s);
   const tryDv = (dv) => {
-    const steps = Math.max(1, Math.ceil(dv / (THRUST_ACCEL * SIM_DT)));
-    const node = { t: ctx.t, heading: 0, power: dv / (steps * THRUST_ACCEL * SIM_DT), duration: steps * SIM_DT };
+    const steps = Math.max(1, Math.ceil(dv / (accel * SIM_DT)));
+    const node = { t: ctx.t, heading: 0, power: dv / (steps * accel * SIM_DT), duration: steps * SIM_DT };
     const c = commitNode(ctx, node, []);
     const apex = cloneCtx(c);
     let rmax = Math.hypot(apex.s.rx, apex.s.ry);

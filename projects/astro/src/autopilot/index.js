@@ -12,7 +12,7 @@ import {
   progradeAngle,
   radians,
   SHIP_SIZE,
-  THRUST_ACCEL,
+  thrustAccel,
 } from "../sim/index.js";
 
 // atterrissage guidé : le moteur s'allume quand la décélération nécessaire
@@ -56,8 +56,9 @@ export function landingControl(s) {
   const target = up + constrain(-vTangent * 0.05, -LANDING_MAX_TILT, LANDING_MAX_TILT);
   const descent = Math.max(0, -vRadial);
   const needed = (descent * descent) / (2 * Math.max(h - 1, 0.5)) + g;
+  const accel = thrustAccel(s);
   let thrust = 0;
-  if (vRadial < 0 && needed > LANDING_IGNITION * THRUST_ACCEL) thrust = Math.min(1, needed / THRUST_ACCEL);
+  if (vRadial < 0 && needed > LANDING_IGNITION * accel) thrust = Math.min(1, needed / accel);
   // pas de poussée tant que le vaisseau n'est pas orienté
   if (Math.abs(angleDiff(s.angle, target)) > 0.3) thrust = 0;
   return { ...COAST, slewTo: target, thrust };

@@ -4,7 +4,7 @@
 // l'interface ne modifie jamais l'état directement.
 // ---------------------------------------------------------------------------
 
-import { sun } from "../sim/index.js";
+import { degrees, getConstant, radians, sun, TUNABLE } from "../sim/index.js";
 import { syncPanel } from "./panels.js";
 
 // références DOM (singletons de la page, pas de l'état de jeu)
@@ -43,7 +43,13 @@ export function setupUI(app, emit) {
     outDuration: byId("out-duration"),
     info: byId("node-info"),
     presets: document.querySelector("#node-panel .presets"),
+    settings: byId("btn-settings"),
+    settingsPanel: byId("settings-panel"),
+    settingsReset: byId("btn-settings-reset"),
+    settingsRows: byId("settings-rows"),
   });
+
+  buildSettingsRows(app, emit);
 
   // liste des destinations, satellites indentés sous leur planète
   const addOption = (body, depth) => {
@@ -74,6 +80,11 @@ export function setupUI(app, emit) {
   onClick(ui.warpUp, () => ({ type: "changeWarp", delta: 1 }));
   onClick(ui.warpDown, () => ({ type: "changeWarp", delta: -1 }));
   onClick(ui.warp, () => ({ type: "resetWarp" }));
+  onClick(ui.settings, () => ({ type: "toggleSettings" }));
+  ui.settingsReset.addEventListener("click", () => {
+    resetSettingsRows(app, emit);
+    ui.settingsReset.blur();
+  });
   ui.route.addEventListener("click", () => {
     emit({ type: "routeStart" });
     ui.routeInfo.textContent = app.view.routeMessage.text;
@@ -100,4 +111,62 @@ export function setupUI(app, emit) {
 
 export function resizeToWindow() {
   resizeCanvas(windowWidth, windowHeight);
+}
+
+// ---------------------------------------------------------------------------
+// Panneau de réglages (⚙) : une ligne par constante réglable (TUNABLE, cf.
+// sim/constants.js) + la masse du vaisseau, construites dynamiquement pour
+// ne pas avoir à dupliquer la liste dans l'HTML. DEFAULTS capture la valeur
+// de départ de chaque ligne, pour « Réinitialiser ».
+// ---------------------------------------------------------------------------
+const DEFAULTS = {};
+
+function settingsRow(label, value, { min, max, step }, onInput) {
+  const row = document.createElement("div");
+  row.className = "settings-row";
+  const lab = document.createElement("label");
+  lab.textContent = label;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = min;
+  input.max = max;
+  input.step = step;
+  input.value = value;
+  input.addEventListener("input", () => {
+    if (input.value !== "") onInput(Number(input.value));
+  });
+  row.append(lab, input);
+  return { row, input };
+}
+
+function buildSettingsRows(app, emit) {
+  ui.settingsRows.innerHTML = "";
+  ui.settingsInputs = {};
+
+  const mass = settingsRow("Masse du vaisseau", app.world.ship.mass, { min: 0.1, max: 20, step: 0.1 }, (v) =>
+    emit({ type: "setShipMass", value: v })
+  );
+  ui.settingsRows.appendChild(mass.row);
+  ui.settingsInputs.mass = mass.input;
+  DEFAULTS.mass = app.world.ship.mass;
+
+  for (const t of TUNABLE) {
+    const value = t.unit === "deg" ? degrees(getConstant(t.key)) : getConstant(t.key);
+    DEFAULTS[t.key] = value;
+    const { row, input } = settingsRow(t.label, value, t, (v) =>
+      emit({ type: "setConstant", key: t.key, value: t.unit === "deg" ? radians(v) : v })
+    );
+    ui.settingsRows.appendChild(row);
+    ui.settingsInputs[t.key] = input;
+  }
+}
+
+function resetSettingsRows(app, emit) {
+  emit({ type: "setShipMass", value: DEFAULTS.mass });
+  ui.settingsInputs.mass.value = DEFAULTS.mass;
+  for (const t of TUNABLE) {
+    const value = DEFAULTS[t.key];
+    emit({ type: "setConstant", key: t.key, value: t.unit === "deg" ? radians(value) : value });
+    ui.settingsInputs[t.key].value = value;
+  }
 }
