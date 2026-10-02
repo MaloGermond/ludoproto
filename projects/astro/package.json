@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "serve . -l 3000",
-    "build": "echo \"static sketch, nothing to build\""
+    "build": "echo \"static sketch, nothing to build\"",
+    "test": "node --test test/*.test.js",
+    "test:update": "UPDATE_GOLDEN=1 node --test test/*.test.js"
   },
   "devDependencies": {
     "serve": "^14.2.1"
