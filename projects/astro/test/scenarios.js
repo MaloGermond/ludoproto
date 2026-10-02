@@ -26,8 +26,8 @@ function predictionSummary(pred) {
 
 // exécute le plan depuis l'état courant du vaisseau, échantillonne tous
 // les `every` pas, puis continue `extra` secondes après la fin du plan
-function runPlan(nodes, extra, every) {
-  const ctx = makeCtx(ship, gameTime, nodes);
+function runPlan(world, nodes, extra, every) {
+  const ctx = makeCtx(world.ship, world.time, nodes);
   const samples = [sampleShip(ctx.s, ctx.t)];
   let step = 0;
   const onStep = (c) => {
@@ -39,7 +39,7 @@ function runPlan(nodes, extra, every) {
   });
   runCtx(ctx, ctx.t + extra, onStep);
   samples.push(sampleShip(ctx.s, ctx.t));
-  const pred = predictPath(ship, gameTime, nodes.length ? createAutopilot(nodes) : null, PLAN_MAX_HORIZON);
+  const pred = predictPath(world.ship, world.time, nodes.length ? createAutopilot(nodes) : null, PLAN_MAX_HORIZON);
   return { nodes: nodeSummary(nodes), samples, prediction: predictionSummary(pred) };
 }
 
@@ -47,9 +47,7 @@ const SCENARIOS = {
   // pilotage manuel : poussée, virage, poussée, puis vol libre (atmosphère
   // terrestre, assistance au cap, retombée)
   decollage() {
-    gameTime = 0;
-    resetShip();
-    const s = cloneShip(ship);
+    const s = cloneShip(createWorld().ship);
     let t = 0;
     let step = 0;
     const samples = [sampleShip(s, t)];
@@ -75,28 +73,25 @@ const SCENARIOS = {
 
   // décollage vertical calculé + circularisation en orbite de parking
   circularisation() {
-    gameTime = 0;
-    resetShip();
+    const world = createWorld();
     const nodes = [];
-    legLaunch(makeCtx(ship, gameTime, null), parkingRadius(planet), nodes);
-    return runPlan(nodes, 60, 60);
+    legLaunch(makeCtx(world.ship, world.time, null), parkingRadius(planet), nodes);
+    return runPlan(world, nodes, 60, 60);
   },
 
   // route complète Terre → Mars (évasion, fenêtre de tir, correction, capture)
   transfert() {
-    gameTime = 0;
-    resetShip();
-    const { nodes } = planRoute(bodyById.mars, 150);
-    return runPlan(nodes, 60, 600);
+    const world = createWorld();
+    const { nodes } = planRoute(world.ship, world.time, bodyById.mars, 150);
+    return runPlan(world, nodes, 60, 600);
   },
 
   // route vers la Lune puis atterrissage guidé
   atterrissage() {
-    gameTime = 0;
-    resetShip();
-    const { nodes, final } = planRoute(bodyById.moon, 100);
+    const world = createWorld();
+    const { nodes, final } = planRoute(world.ship, world.time, bodyById.moon, 100);
     const landing = landingSequence(final, final.t);
-    return runPlan([...nodes, ...landing.nodes], 5, 60);
+    return runPlan(world, [...nodes, ...landing.nodes], 5, 60);
   },
 };
 

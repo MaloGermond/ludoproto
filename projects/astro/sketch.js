@@ -171,48 +171,16 @@ for (const b of ALL_BODIES) {
 const sun = ALL_BODIES.find((b) => !b.parentBody);
 const planet = bodyById.earth; // astre de départ du vaisseau
 
-let ship;
+// ---------------------------------------------------------------------------
+// État du jeu, regroupé en deux objets explicites que les fonctions reçoivent
+// en paramètre (aucune variable d'état globale) :
+// - world : ce qui est simulé ou planifié (vaisseau, temps, mode, plan…) ;
+// - view : la façon de le regarder et de l'éditer (caméra, sélection…).
+// ---------------------------------------------------------------------------
 
-let gameTime = 0;
-let simAccumulator = 0;
-let warpIndex = 0;
-
-let cameraX = 0;
-let cameraY = 0;
-let zoom = 1;
-let zoomBias = 1; // réglage molette en caméra suiveuse
-let cameraFree = false;
-let cameraFrame = null; // astre avec lequel la caméra se déplace
-
-// "flight" : jeu en cours · "planning" : jeu en pause, édition du plan
-let mode = "flight";
-let planNodes = []; // manœuvres en cours d'édition
-let planTarget = null; // orbite visée par le calculateur de route { body, radius }
-let nextNodeId = 1;
-let selectedNodeId = null;
-let planPrediction = null; // tracé mis en cache pendant la planification
-let planDirty = true;
-let autopilot = null; // plan en cours d'exécution
-let autopilotPrediction = null; // son tracé : l'exécution est déterministe, il reste valable
-let autopilotTarget = null;
-let flightPrediction = null;
-let flightPredictionDirty = true;
-
-let pointer = null; // geste souris en cours
-let routeMessage = { text: "", error: false };
-
-let canvasElt;
-const ui = {};
-
-function setup() {
-  canvasElt = createCanvas(windowWidth, windowHeight).elt;
-  setupUI();
-  resetShip();
-}
-
-function resetShip() {
+function createShip(t) {
   const startAngle = -HALF_PI; // sommet de la planète
-  ship = {
+  const ship = {
     ref: planet,
     rx: Math.cos(startAngle) * (planet.radius + SHIP_SIZE / 2),
     ry: Math.sin(startAngle) * (planet.radius + SHIP_SIZE / 2),
@@ -228,17 +196,83 @@ function resetShip() {
     fuel: FUEL_MAX,
     heat: 0,
   };
-  syncShipAbsolute(ship, gameTime);
-  autopilot = null;
-  autopilotPrediction = null;
-  flightPredictionDirty = true;
-  cameraX = ship.x; // évite un panoramique depuis le Soleil au démarrage/relance
-  cameraY = ship.y;
-  cameraFrame = null;
+  syncShipAbsolute(ship, t);
+  return ship;
 }
 
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
+function createWorld() {
+  const world = {
+    ship: null,
+    time: 0, // horloge de jeu
+    accumulator: 0, // temps réel pas encore converti en pas de simulation
+    warpIndex: 0,
+    mode: "flight", // "flight" : jeu en cours · "planning" : pause, édition du plan
+    nextNodeId: 1,
+    plan: {
+      nodes: [], // manœuvres en cours d'édition
+      target: null, // orbite visée par le calculateur de route { body, radius }
+      prediction: null, // tracé mis en cache pendant la planification
+      dirty: true,
+    },
+    autopilot: null, // plan en cours d'exécution
+    autopilotPrediction: null, // son tracé : l'exécution est déterministe, il reste valable
+    autopilotTarget: null,
+    flightPrediction: null,
+    flightPredictionDirty: true,
+  };
+  resetShip(world);
+  return world;
+}
+
+function createView(world) {
+  return {
+    cameraX: world.ship.x, // centrée sur le vaisseau au démarrage
+    cameraY: world.ship.y,
+    zoom: 1,
+    zoomBias: 1, // réglage molette en caméra suiveuse
+    cameraFree: false,
+    cameraFrame: null, // astre avec lequel la caméra se déplace
+    selectedNodeId: null,
+    pointer: null, // geste souris en cours
+    routeMessage: { text: "", error: false },
+  };
+}
+
+function resetShip(world) {
+  world.ship = createShip(world.time);
+  world.autopilot = null;
+  world.autopilotPrediction = null;
+  world.flightPredictionDirty = true;
+}
+
+// évite un panoramique depuis le Soleil au démarrage/relance
+function recenterCamera(view, ship) {
+  view.cameraX = ship.x;
+  view.cameraY = ship.y;
+  view.cameraFrame = null;
+}
+
+// ---------------------------------------------------------------------------
+// Copies : la simulation et la planification travaillent sur des copies
+// pour explorer des futurs possibles sans toucher à l'état du jeu
+// ---------------------------------------------------------------------------
+
+function cloneShip(s) {
+  return { ...s };
+}
+
+// kind : undefined pour une manœuvre classique (rotation + poussée fixe),
+// "land" pour un atterrissage guidé
+function copyNode(n) {
+  return { id: n.id, kind: n.kind, t: n.t, heading: n.heading, power: n.power, duration: n.duration };
+}
+
+function cloneAutopilot(ap) {
+  return { ...ap, nodes: ap.nodes.map((n) => ({ ...n })) };
+}
+
+function cloneCtx(c) {
+  return { s: cloneShip(c.s), t: c.t, ap: c.ap ? cloneAutopilot(c.ap) : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -304,10 +338,6 @@ function slewToward(angle, target, maxStep) {
   const d = angleDiff(angle, target);
   if (Math.abs(d) <= maxStep) return target;
   return angle + Math.sign(d) * maxStep;
-}
-
-function cloneShip(s) {
-  return { ...s };
 }
 
 // position/vitesse absolues (affichage, caméra)
@@ -534,12 +564,6 @@ function createAutopilot(nodes) {
   };
 }
 
-// kind : undefined pour une manœuvre classique (rotation + poussée fixe),
-// "land" pour un atterrissage guidé
-function copyNode(n) {
-  return { id: n.id, kind: n.kind, t: n.t, heading: n.heading, power: n.power, duration: n.duration };
-}
-
 // commande de l'atterrissage guidé : nez vers le haut (incliné pour annuler
 // la vitesse horizontale), poussée déclenchée au dernier moment et dosée
 // pour que vitesse de descente et altitude s'annulent ensemble
@@ -560,10 +584,6 @@ function landingControl(s) {
   // pas de poussée tant que le vaisseau n'est pas orienté
   if (Math.abs(angleDiff(s.angle, target)) > 0.3) thrust = 0;
   return { ...COAST, slewTo: target, thrust };
-}
-
-function cloneAutopilot(ap) {
-  return { ...ap, nodes: ap.nodes.map((n) => ({ ...n })) };
 }
 
 function recordAt(node, key, s, t) {
@@ -650,10 +670,6 @@ function remainingNodes(ap, t) {
 
 function makeCtx(state, t, nodes) {
   return { s: cloneShip(state), t, ap: nodes && nodes.length ? createAutopilot(nodes) : null };
-}
-
-function cloneCtx(c) {
-  return { s: cloneShip(c.s), t: c.t, ap: c.ap ? cloneAutopilot(c.ap) : null };
 }
 
 function planDone(ctx) {
@@ -827,25 +843,26 @@ function displayPosition(pred, patch, rx, ry) {
   return a ? { x: a.x + rx, y: a.y + ry } : null;
 }
 
-function currentPlanPrediction() {
-  if (planDirty || !planPrediction) {
-    const plan = planNodes.length ? createAutopilot(planNodes) : null;
-    planPrediction = predictPath(ship, gameTime, plan, PLAN_MAX_HORIZON);
-    planDirty = false;
+function currentPlanPrediction(world) {
+  const plan = world.plan;
+  if (plan.dirty || !plan.prediction) {
+    plan.prediction = predictPath(world.ship, world.time, plan.nodes.length ? createAutopilot(plan.nodes) : null, PLAN_MAX_HORIZON);
+    plan.dirty = false;
   }
-  return planPrediction;
+  return plan.prediction;
 }
 
-function currentFlightPrediction() {
+function currentFlightPrediction(world) {
+  const ship = world.ship;
   if (ship.crashed) return null;
-  if (autopilot && autopilotPrediction) return autopilotPrediction;
+  if (world.autopilot && world.autopilotPrediction) return world.autopilotPrediction;
   if (ship.landed) return null;
-  if (flightPredictionDirty || !flightPrediction || gameTime > flightPrediction.finalT - 1) {
+  if (world.flightPredictionDirty || !world.flightPrediction || world.time > world.flightPrediction.finalT - 1) {
     const horizon = ship.thrusting ? THRUST_PREDICTION_HORIZON : PLAN_MAX_HORIZON;
-    flightPrediction = predictPath(ship, gameTime, null, horizon);
-    flightPredictionDirty = ship.thrusting; // tracé complet dès que la poussée s'arrête
+    world.flightPrediction = predictPath(ship, world.time, null, horizon);
+    world.flightPredictionDirty = ship.thrusting; // tracé complet dès que la poussée s'arrête
   }
-  return flightPrediction;
+  return world.flightPrediction;
 }
 
 // ---------------------------------------------------------------------------
@@ -940,7 +957,6 @@ function makeBurnNode(ctx, tCenter, dvFn) {
 // ajoute la manœuvre au plan et simule jusqu'à sa fin
 function commitNode(ctx, node, nodes) {
   const c = cloneCtx(ctx);
-  node.id = nextNodeId++;
   if (c.ap) c.ap.nodes.push(copyNode(node));
   else c.ap = createAutopilot([node]);
   nodes.push(node);
@@ -1013,7 +1029,6 @@ function legLaunch(ctx, rp, nodes) {
     else hi = mid;
   }
   const best = tryDv(hi);
-  best.node.id = nextNodeId++;
   nodes.push(best.node);
   return circularize(best.afterBurn, best.tApex, nodes, 1);
 }
@@ -1124,7 +1139,6 @@ function correctTrajectory(ctx, objective, scale, tol, nodes) {
     const found = searchAlong(evalM, phi, f0, scale, tol);
     if (found) {
       if (!found.node) return ctx;
-      found.node.id = nextNodeId++;
       nodes.push(found.node);
       return found.c;
     }
@@ -1277,7 +1291,6 @@ function legUp(ctx, rt, nodes) {
   const minVinf = 0.6 * Math.sqrt((2 * C.mu) / C.soi);
   const vinf = Math.sign(hohmann) * Math.max(Math.abs(hohmann), minVinf);
   const esc = escapeBurn(ctx, vinf);
-  esc.node.id = nextNodeId++;
   nodes.push(esc.node);
 
   const a = (rC + rt) / 2;
@@ -1346,7 +1359,6 @@ function legAcross(ctx, B, rt, nodes) {
   const tw = earliest + (rate > 0 ? mod(-g(earliest), TWO_PI) : mod(g(earliest), TWO_PI)) / Math.abs(rate);
 
   const esc = escapeBurn(ctx, vinf, tw);
-  esc.node.id = nextNodeId++;
   nodes.push(esc.node);
 
   const mcc = runCtx(cloneCtx(esc.ctx), esc.tExit + 5);
@@ -1383,7 +1395,7 @@ function routeLegs(C, B) {
   return legs;
 }
 
-function planRoute(target, altitude) {
+function planRoute(ship, t, target, altitude) {
   if (ship.crashed) throw new PlanError("Vaisseau détruit — [R] pour relancer.");
   const rt = target.radius + altitude;
   if (altitude < 10) throw new PlanError("Altitude trop basse (minimum 10).");
@@ -1392,7 +1404,7 @@ function planRoute(target, altitude) {
   }
 
   const nodes = [];
-  let ctx = makeCtx(ship, gameTime, null);
+  let ctx = makeCtx(ship, t, null);
   const home = ctx.s.ref;
   if (ctx.s.landed) ctx = legLaunch(ctx, home === target ? rt : parkingRadius(home), nodes);
   else ctx = legStabilize(ctx, nodes);
@@ -1413,28 +1425,33 @@ function planRoute(target, altitude) {
   return { nodes, final: ctx };
 }
 
-function computeRoute() {
-  const target = bodyById[ui.target.value];
-  const altitude = Number(ui.altitude.value);
+// numérote les manœuvres qui entrent dans le plan (le calculateur de route
+// les produit sans identifiant)
+function withIds(world, nodes) {
+  return nodes.map((n) => ({ ...copyNode(n), id: world.nextNodeId++ }));
+}
+
+function computeRoute(world, view, targetId, altitude) {
+  const target = bodyById[targetId];
+  const ship = world.ship;
   try {
-    const { nodes, final } = planRoute(target, altitude);
-    planNodes = nodes.map(copyNode);
-    planTarget = { body: target, radius: target.radius + altitude };
-    selectedNodeId = null;
-    planDirty = true;
-    syncPanel();
+    const { nodes, final } = planRoute(ship, world.time, target, altitude);
+    world.plan.nodes = withIds(world, nodes);
+    world.plan.target = { body: target, radius: target.radius + altitude };
+    world.plan.dirty = true;
+    view.selectedNodeId = null;
     const dv = nodes.reduce((sum, n) => sum + n.power * n.duration * THRUST_ACCEL, 0);
     const el = orbitElements(final.s);
-    routeMessage = {
+    view.routeMessage = {
       text:
         `${nodes.length} manœuvres · Δv ${dv.toFixed(0)} (carburant ${ship.fuel.toFixed(0)})\n` +
-        `Arrivée ${formatT(final.t)} · orbite ${(el.periapsis - target.radius).toFixed(0)}–${(el.apoapsis - target.radius).toFixed(0)}` +
+        `Arrivée ${formatT(final.t, world.time)} · orbite ${(el.periapsis - target.radius).toFixed(0)}–${(el.apoapsis - target.radius).toFixed(0)}` +
         (dv > ship.fuel ? "\n⚠ Carburant insuffisant pour tout le plan" : ""),
       error: dv > ship.fuel,
     };
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
-    routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de la route.", error: true };
+    view.routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de la route.", error: true };
   }
 }
 
@@ -1453,186 +1470,183 @@ function readManualControl() {
 }
 
 // l'accélération du temps ralentit à l'approche d'une manœuvre du plan
-function effectiveWarp() {
-  let warp = WARP_LEVELS[warpIndex];
+function effectiveWarp(world) {
+  let warp = WARP_LEVELS[world.warpIndex];
+  const autopilot = world.autopilot;
   if (autopilot) {
     const node = autopilot.nodes[autopilot.index];
     if (autopilot.phase !== "pending") warp = 1;
-    else if (node) warp = Math.min(warp, Math.max(1, node.t - gameTime));
+    else if (node) warp = Math.min(warp, Math.max(1, node.t - world.time));
   }
   return warp;
 }
 
-function advanceSimulation(elapsed) {
-  const warp = effectiveWarp();
-  simAccumulator += Math.min(elapsed, MAX_FRAME_DT) * warp;
-  const manual = readManualControl();
+function stopAutopilot(world) {
+  world.autopilot = null;
+  world.autopilotPrediction = null;
+}
+
+// un pas fixe de simulation : pilote automatique (s'il y en a un), sinon
+// commande manuelle, puis physique du vaisseau
+function stepWorld(world, control) {
+  if (world.autopilot) {
+    const planned = autopilotControl(world.autopilot, world.ship, world.time);
+    if (planned) control = planned;
+    else {
+      stopAutopilot(world); // plan terminé : retour en pilotage manuel
+      world.flightPredictionDirty = true;
+    }
+  }
+  const wasLanded = world.ship.landed;
+  stepShip(world.ship, world.time, SIM_DT, control);
+  world.time += SIM_DT;
+  if (world.ship.thrusting || world.ship.landed !== wasLanded) world.flightPredictionDirty = true;
+}
+
+function advanceSimulation(world, elapsed, manual) {
+  const warp = effectiveWarp(world);
+  world.accumulator += Math.min(elapsed, MAX_FRAME_DT) * warp;
 
   // toute commande manuelle reprend la main sur le pilote automatique
-  if (autopilot && (manual.left || manual.right || manual.thrust > 0)) {
-    autopilot = null;
-    autopilotPrediction = null;
-    flightPredictionDirty = true;
+  if (world.autopilot && (manual.left || manual.right || manual.thrust > 0)) {
+    stopAutopilot(world);
+    world.flightPredictionDirty = true;
   }
 
-  while (simAccumulator >= SIM_DT) {
-    simAccumulator -= SIM_DT;
-    let control = manual;
-    if (autopilot) {
-      const planned = autopilotControl(autopilot, ship, gameTime);
-      if (planned) control = planned;
-      else {
-        autopilot = null; // plan terminé : retour en pilotage manuel
-        autopilotPrediction = null;
-        flightPredictionDirty = true;
-      }
-    }
-    const wasLanded = ship.landed;
-    stepShip(ship, gameTime, SIM_DT, control);
-    gameTime += SIM_DT;
-    if (ship.thrusting || ship.landed !== wasLanded) flightPredictionDirty = true;
+  while (world.accumulator >= SIM_DT) {
+    world.accumulator -= SIM_DT;
+    stepWorld(world, manual);
   }
-  if (ship.crashed) {
-    autopilot = null;
-    autopilotPrediction = null;
-  }
+  if (world.ship.crashed) stopAutopilot(world);
 }
 
 // la caméra accompagne l'astre de référence du vaisseau (sinon, avec la
 // Terre qui file autour du Soleil, tout sortirait de l'écran)
-function updateCamera() {
-  const refPos = bodyPositionAt(ship.ref, gameTime);
-  if (cameraFrame && cameraFrame.body === ship.ref) {
-    cameraX += refPos.x - cameraFrame.x;
-    cameraY += refPos.y - cameraFrame.y;
+function updateCamera(view, world) {
+  const ship = world.ship;
+  const refPos = bodyPositionAt(ship.ref, world.time);
+  if (view.cameraFrame && view.cameraFrame.body === ship.ref) {
+    view.cameraX += refPos.x - view.cameraFrame.x;
+    view.cameraY += refPos.y - view.cameraFrame.y;
   }
-  cameraFrame = { body: ship.ref, x: refPos.x, y: refPos.y };
-  if (cameraFree) return;
+  view.cameraFrame = { body: ship.ref, x: refPos.x, y: refPos.y };
+  if (view.cameraFree) return;
 
   // caméra suiveuse : centrée sur le vaisseau, dézoome quand la vitesse augmente
   const speed = Math.hypot(ship.rvx, ship.rvy);
-  const targetZoom = constrain(map(speed, 0, 150, 1, 0.3), 0.25, 1) * zoomBias;
-  zoom = lerp(zoom, targetZoom, 0.05);
-  cameraX = lerp(cameraX, ship.x, 0.15);
-  cameraY = lerp(cameraY, ship.y, 0.15);
+  const targetZoom = constrain(map(speed, 0, 150, 1, 0.3), 0.25, 1) * view.zoomBias;
+  view.zoom = lerp(view.zoom, targetZoom, 0.05);
+  view.cameraX = lerp(view.cameraX, ship.x, 0.15);
+  view.cameraY = lerp(view.cameraY, ship.y, 0.15);
+}
+
+// ---------------------------------------------------------------------------
+// Crochets p5 : seul endroit où vivent l'état du jeu et sa vue
+// ---------------------------------------------------------------------------
+
+const app = { world: null, view: null };
+
+function setup() {
+  ui.canvas = createCanvas(windowWidth, windowHeight).elt;
+  app.world = createWorld();
+  app.view = createView(app.world);
+  setupUI(app);
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
 }
 
 function draw() {
-  if (mode === "flight") advanceSimulation(deltaTime * 0.001);
+  const { world, view } = app;
+  if (world.mode === "flight") advanceSimulation(world, deltaTime * 0.001, readManualControl());
 
-  bodies(gameTime);
-  syncShipAbsolute(ship, gameTime);
-  const referenceBody = ship.ref;
-  if (mode === "flight") updateCamera();
+  bodies(world.time);
+  syncShipAbsolute(world.ship, world.time);
+  if (world.mode === "flight") updateCamera(view, world);
 
-  const prediction = mode === "planning" ? currentPlanPrediction() : currentFlightPrediction();
-  if (prediction) layoutPrediction(prediction, gameTime);
-  const target = mode === "planning" ? planTarget : autopilot ? autopilotTarget : null;
-
-  background(6, 8, 16);
-  drawStars();
-
-  push();
-  translate(width / 2, height / 2);
-  scale(zoom);
-  translate(-cameraX, -cameraY);
-
-  drawOrbits();
-  if (prediction) drawGhostBodies(prediction);
-  for (const body of ALL_BODIES) drawBody(body);
-  if (prediction) {
-    drawTargetOrbit(prediction, target);
-    drawPredictedPath(prediction);
-    if (prediction.periapsis) drawApsis(prediction, prediction.periapsis, "Périastre", [255, 130, 130]);
-    if (prediction.apoapsis) drawApsis(prediction, prediction.apoapsis, "Apoastre", [130, 190, 255]);
-    drawPathEnd(prediction);
-    drawManeuverNodes(prediction);
-  }
-  drawShip();
-  drawVelocityVector();
-
-  pop();
-
-  drawBodyLabels();
-  drawHUD(referenceBody, prediction);
-  updateUI(prediction);
+  const prediction = world.mode === "planning" ? currentPlanPrediction(world) : currentFlightPrediction(world);
+  if (prediction) layoutPrediction(prediction, world.time);
+  renderScene(world, view, prediction);
+  updateUI(world, view, prediction);
 }
 
 // ---------------------------------------------------------------------------
 // Mode planification
 // ---------------------------------------------------------------------------
 
-function canPlan() {
-  return !ship.crashed;
+function canPlan(world) {
+  return !world.ship.crashed;
 }
 
-function enterPlanning() {
-  if (mode === "planning" || !canPlan()) return;
-  mode = "planning";
+function enterPlanning(world, view) {
+  if (world.mode === "planning" || !canPlan(world)) return;
+  world.mode = "planning";
   // le plan en cours (s'il y en a un) redevient éditable
-  planNodes = autopilot ? remainingNodes(autopilot, gameTime) : [];
-  planTarget = autopilot ? autopilotTarget : null;
-  autopilot = null;
-  autopilotPrediction = null;
-  selectedNodeId = null;
-  routeMessage = { text: "", error: false };
-  planDirty = true;
-  syncPanel();
+  world.plan.nodes = world.autopilot ? remainingNodes(world.autopilot, world.time) : [];
+  world.plan.target = world.autopilot ? world.autopilotTarget : null;
+  world.plan.dirty = true;
+  stopAutopilot(world);
+  view.selectedNodeId = null;
+  view.routeMessage = { text: "", error: false };
 }
 
-function launchPlan() {
-  if (mode !== "planning") return;
-  const prediction = currentPlanPrediction();
-  autopilot = planNodes.length ? createAutopilot(planNodes) : null;
+function launchPlan(world, view) {
+  if (world.mode !== "planning") return;
+  const prediction = currentPlanPrediction(world);
+  const plan = world.plan;
+  world.autopilot = plan.nodes.length ? createAutopilot(plan.nodes) : null;
   // exécution déterministe : le tracé planifié reste exact pendant le vol
-  autopilotPrediction = autopilot ? prediction : null;
-  autopilotTarget = autopilot ? planTarget : null;
-  planNodes = [];
-  planTarget = null;
-  selectedNodeId = null;
-  pointer = null;
-  flightPredictionDirty = true;
-  cameraFrame = null;
-  mode = "flight";
-  syncPanel();
+  world.autopilotPrediction = world.autopilot ? prediction : null;
+  world.autopilotTarget = world.autopilot ? plan.target : null;
+  plan.nodes = [];
+  plan.target = null;
+  world.flightPredictionDirty = true;
+  world.mode = "flight";
+  view.selectedNodeId = null;
+  view.pointer = null;
+  view.cameraFrame = null;
 }
 
-function clearPlan() {
-  planNodes = [];
-  planTarget = null;
-  selectedNodeId = null;
-  routeMessage = { text: "", error: false };
-  planDirty = true;
-  syncPanel();
+function clearPlan(world, view) {
+  world.plan.nodes = [];
+  world.plan.target = null;
+  world.plan.dirty = true;
+  view.selectedNodeId = null;
+  view.routeMessage = { text: "", error: false };
 }
 
-function selectedNode() {
-  return planNodes.find((n) => n.id === selectedNodeId) || null;
+function selectedNode(world, view) {
+  return world.plan.nodes.find((n) => n.id === view.selectedNodeId) || null;
 }
 
-function addNodeAt(t) {
-  const node = { id: nextNodeId++, t, ...DEFAULT_NODE };
-  planNodes.push(node);
-  planNodes.sort((a, b) => a.t - b.t);
-  selectedNodeId = node.id;
-  planDirty = true;
-  syncPanel();
+// ajoute des manœuvres au plan et sélectionne la dernière
+function addNodes(world, view, nodes) {
+  const added = withIds(world, nodes);
+  world.plan.nodes.push(...added);
+  world.plan.nodes.sort((a, b) => a.t - b.t);
+  world.plan.dirty = true;
+  view.selectedNodeId = added[added.length - 1].id;
+}
+
+function addNodeAt(world, view, t) {
+  addNodes(world, view, [{ t, ...DEFAULT_NODE }]);
+}
+
+// état du vaisseau une fois le plan actuel exécuté
+function planEnd(world) {
+  return runCtx(makeCtx(world.ship, world.time, world.plan.nodes), Infinity, (c) => !planDone(c));
 }
 
 // ajoute, après les manœuvres déjà prévues, celle qui circularise l'orbite
 // à la distance où se trouve alors le vaisseau
-function circularizeOrbit() {
-  if (mode !== "planning" || ship.crashed) return;
-  const ctx = runCtx(makeCtx(ship, gameTime, planNodes), Infinity, (c) => !planDone(c));
+function circularizeOrbit(world, view) {
+  if (world.mode !== "planning" || world.ship.crashed) return;
+  const ctx = planEnd(world);
   if (ctx.s.landed || ctx.s.crashed) return;
   const node = makeBurnNode(ctx, ctx.t, (s) => circularDv(s, 0));
   if (!node) return; // déjà circulaire
-  node.id = nextNodeId++;
-  planNodes.push(node);
-  planNodes.sort((a, b) => a.t - b.t);
-  selectedNodeId = node.id;
-  planDirty = true;
-  syncPanel();
+  addNodes(world, view, [node]);
 }
 
 // séquence d'atterrissage : poussée qui annule la vitesse relative au temps
@@ -1647,21 +1661,16 @@ function landingSequence(ctx, deorbitT) {
   let c = deorbit ? commitNode(c0, deorbit, nodes) : c0;
   const land = { kind: "land", t: c.t, heading: 0, power: 1, duration: 0 };
   c = cloneCtx(c);
-  land.id = nextNodeId++;
   c.ap.nodes.push(copyNode(land));
   nodes.push(land);
   runCtx(c, c.t + LANDING_TIMEOUT, (cc) => !planDone(cc));
   return { c, nodes };
 }
 
-function commitLanding(nodes, c, before, body) {
-  planNodes.push(...nodes.map(copyNode));
-  planNodes.sort((a, b) => a.t - b.t);
-  selectedNodeId = nodes[nodes.length - 1].id;
-  planDirty = true;
-  syncPanel();
-  routeMessage = {
-    text: `Atterrissage sur ${body.name} · Δv ${(before.s.fuel - c.s.fuel).toFixed(0)} · posé à ${formatT(c.t)} · angle ${degrees(c.s.landedAngle).toFixed(0)}°`,
+function commitLanding(world, view, nodes, c, before, body) {
+  addNodes(world, view, nodes);
+  view.routeMessage = {
+    text: `Atterrissage sur ${body.name} · Δv ${(before.s.fuel - c.s.fuel).toFixed(0)} · posé à ${formatT(c.t, world.time)} · angle ${degrees(c.s.landedAngle).toFixed(0)}°`,
     error: false,
   };
 }
@@ -1677,18 +1686,18 @@ function checkLandingPossible(ctx, body) {
 
 // ajoute, après les manœuvres déjà prévues, un atterrissage sur l'astre
 // autour duquel le vaisseau se trouve alors, dès que possible
-function planLanding() {
-  if (mode !== "planning" || ship.crashed) return;
-  const ctx = runCtx(makeCtx(ship, gameTime, planNodes), Infinity, (c) => !planDone(c));
+function planLanding(world, view) {
+  if (world.mode !== "planning" || world.ship.crashed) return;
+  const ctx = planEnd(world);
   const body = ctx.s.ref;
   try {
     checkLandingPossible(ctx, body);
     const { c, nodes } = landingSequence(ctx, ctx.t);
     if (!c.s.landed || c.s.ref !== body) throw new PlanError(`L'atterrissage sur ${body.name} échoue (crash ou carburant).`);
-    commitLanding(nodes, c, ctx, body);
+    commitLanding(world, view, nodes, c, ctx, body);
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
-    routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage.", error: true };
+    view.routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage.", error: true };
   }
 }
 
@@ -1700,9 +1709,9 @@ function planLanding() {
 // rétrograde prenant un temps variable) sur une période orbitale complète —
 // il passe donc par la cible exactement une fois. Balayage grossier pour
 // repérer ce passage, puis dichotomie pour l'affiner.
-function planLandingAt(targetAngleDeg) {
-  if (mode !== "planning" || ship.crashed) return;
-  const base = runCtx(makeCtx(ship, gameTime, planNodes), Infinity, (c) => !planDone(c));
+function planLandingAt(world, view, targetAngleDeg) {
+  if (world.mode !== "planning" || world.ship.crashed) return;
+  const base = planEnd(world);
   const body = base.s.ref;
   try {
     checkLandingPossible(base, body);
@@ -1753,42 +1762,41 @@ function planLandingAt(targetAngleDeg) {
     if (Math.abs(result.err) >= radians(2)) {
       throw new PlanError(`Visée imprécise (écart ${degrees(Math.abs(result.err)).toFixed(0)}°).`);
     }
-    commitLanding(result.nodes, result.c, base, body);
+    commitLanding(world, view, result.nodes, result.c, base, body);
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
-    routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage visé.", error: true };
+    view.routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage visé.", error: true };
   }
 }
 
-function deleteSelectedNode() {
-  if (selectedNodeId === null) return;
-  planNodes = planNodes.filter((n) => n.id !== selectedNodeId);
-  selectedNodeId = null;
-  planDirty = true;
-  syncPanel();
+function deleteSelectedNode(world, view) {
+  if (view.selectedNodeId === null) return;
+  world.plan.nodes = world.plan.nodes.filter((n) => n.id !== view.selectedNodeId);
+  world.plan.dirty = true;
+  view.selectedNodeId = null;
 }
 
-function updateSelectedNode(changes) {
-  const node = selectedNode();
+function updateSelectedNode(world, view, changes) {
+  const node = selectedNode(world, view);
   if (!node) return;
   Object.assign(node, changes);
-  planNodes.sort((a, b) => a.t - b.t);
-  planDirty = true;
+  world.plan.nodes.sort((a, b) => a.t - b.t);
+  world.plan.dirty = true;
 }
 
-function worldToScreen(x, y) {
-  return { x: (x - cameraX) * zoom + width / 2, y: (y - cameraY) * zoom + height / 2 };
+function worldToScreen(view, x, y) {
+  return { x: (x - view.cameraX) * view.zoom + width / 2, y: (y - view.cameraY) * view.zoom + height / 2 };
 }
 
-function screenToWorld(x, y) {
-  return { x: (x - width / 2) / zoom + cameraX, y: (y - height / 2) / zoom + cameraY };
+function screenToWorld(view, x, y) {
+  return { x: (x - width / 2) / view.zoom + view.cameraX, y: (y - height / 2) / view.zoom + view.cameraY };
 }
 
-function nearestPathPoint(pred, sx, sy) {
+function nearestPathPoint(view, pred, sx, sy) {
   let best = null;
   let bestDist = Infinity;
   for (const p of pred.display) {
-    const s = worldToScreen(p.x, p.y);
+    const s = worldToScreen(view, p.x, p.y);
     const d = dist(s.x, s.y, sx, sy);
     if (d < bestDist) {
       bestDist = d;
@@ -1798,99 +1806,138 @@ function nearestPathPoint(pred, sx, sy) {
   return best ? { point: best, dist: bestDist } : null;
 }
 
-function nodeAtScreen(pred, sx, sy) {
+function nodeAtScreen(view, pred, sx, sy) {
   for (const pn of pred.nodes) {
     if (pn.startT === undefined) continue;
     const p = displayPosition(pred, pn.startPatch, pn.startX, pn.startY);
     if (!p) continue;
-    const s = worldToScreen(p.x, p.y);
+    const s = worldToScreen(view, p.x, p.y);
     if (dist(s.x, s.y, sx, sy) < NODE_HIT_RADIUS) return pn.id;
   }
   return null;
 }
 
 function mousePressed(event) {
-  if (!event || event.target !== canvasElt) return;
-  if (mode === "planning") {
-    const prediction = currentPlanPrediction();
-    const hitId = nodeAtScreen(prediction, mouseX, mouseY);
+  if (!event || event.target !== ui.canvas) return;
+  const { world, view } = app;
+  if (world.mode === "planning") {
+    const prediction = currentPlanPrediction(world);
+    const hitId = nodeAtScreen(view, prediction, mouseX, mouseY);
     if (hitId !== null) {
-      selectedNodeId = hitId;
-      syncPanel();
+      view.selectedNodeId = hitId;
+      syncPanel(world, view);
       // tracé de référence pour le glisser : le plan sans ce point, dont la
       // trajectoire ne dépend pas de l'endroit où on le déplace
-      const others = planNodes.filter((n) => n.id !== hitId);
-      const pick = predictPath(ship, gameTime, others.length ? createAutopilot(others) : null, PLAN_MAX_HORIZON);
-      pointer = { kind: "node", pick };
+      const others = world.plan.nodes.filter((n) => n.id !== hitId);
+      const pick = predictPath(world.ship, world.time, others.length ? createAutopilot(others) : null, PLAN_MAX_HORIZON);
+      view.pointer = { kind: "node", pick };
       return;
     }
   }
-  pointer = { kind: "pan", startX: mouseX, startY: mouseY, moved: false };
+  view.pointer = { kind: "pan", startX: mouseX, startY: mouseY, moved: false };
 }
 
 function mouseDragged() {
+  const { world, view } = app;
+  const pointer = view.pointer;
   if (!pointer) return;
   if (pointer.kind === "node") {
-    const nearest = nearestPathPoint(layoutPrediction(pointer.pick, gameTime), mouseX, mouseY);
+    const nearest = nearestPathPoint(view, layoutPrediction(pointer.pick, world.time), mouseX, mouseY);
     if (nearest) {
-      updateSelectedNode({ t: nearest.point.t });
-      syncPanel();
+      updateSelectedNode(world, view, { t: nearest.point.t });
+      syncPanel(world, view);
     }
     return;
   }
   if (dist(mouseX, mouseY, pointer.startX, pointer.startY) > CLICK_MAX_MOVE) pointer.moved = true;
   if (pointer.moved) {
-    cameraFree = true; // glisser la vue en vol passe en caméra libre
-    cameraX -= (mouseX - pmouseX) / zoom;
-    cameraY -= (mouseY - pmouseY) / zoom;
+    view.cameraFree = true; // glisser la vue en vol passe en caméra libre
+    view.cameraX -= (mouseX - pmouseX) / view.zoom;
+    view.cameraY -= (mouseY - pmouseY) / view.zoom;
   }
 }
 
 function mouseReleased() {
+  const { world, view } = app;
+  const pointer = view.pointer;
   if (!pointer) return;
-  if (mode === "planning" && pointer.kind === "pan" && !pointer.moved) {
+  if (world.mode === "planning" && pointer.kind === "pan" && !pointer.moved) {
     // simple clic : pose un point de manœuvre sur le tracé, sinon désélectionne
-    const nearest = nearestPathPoint(currentPlanPrediction(), mouseX, mouseY);
-    if (nearest && nearest.dist < PICK_RADIUS) {
-      addNodeAt(nearest.point.t);
-    } else {
-      selectedNodeId = null;
-      syncPanel();
-    }
+    const nearest = nearestPathPoint(view, currentPlanPrediction(world), mouseX, mouseY);
+    if (nearest && nearest.dist < PICK_RADIUS) addNodeAt(world, view, nearest.point.t);
+    else view.selectedNodeId = null;
+    syncPanel(world, view);
   }
-  pointer = null;
+  view.pointer = null;
 }
 
 function mouseWheel(event) {
-  if (event.target !== canvasElt) return;
+  if (event.target !== ui.canvas) return;
+  const { world, view } = app;
   const factor = Math.pow(1.0015, -event.delta);
-  if (mode === "flight" && !cameraFree) {
-    zoomBias = constrain(zoomBias * factor, 0.0005, 4);
+  if (world.mode === "flight" && !view.cameraFree) {
+    view.zoomBias = constrain(view.zoomBias * factor, 0.0005, 4);
     return false;
   }
   // zoom centré sur le curseur
-  const before = screenToWorld(mouseX, mouseY);
-  zoom = constrain(zoom * factor, 0.0005, 4);
-  const after = screenToWorld(mouseX, mouseY);
-  cameraX += before.x - after.x;
-  cameraY += before.y - after.y;
+  const before = screenToWorld(view, mouseX, mouseY);
+  view.zoom = constrain(view.zoom * factor, 0.0005, 4);
+  const after = screenToWorld(view, mouseX, mouseY);
+  view.cameraX += before.x - after.x;
+  view.cameraY += before.y - after.y;
   return false;
 }
 
-function toggleCamera() {
-  cameraFree = !cameraFree;
-  if (!cameraFree) zoomBias = constrain(zoom, 0.0005, 4);
+function toggleCamera(view) {
+  view.cameraFree = !view.cameraFree;
+  if (!view.cameraFree) view.zoomBias = constrain(view.zoom, 0.0005, 4);
 }
 
-function changeWarp(delta) {
-  warpIndex = constrain(warpIndex + delta, 0, WARP_LEVELS.length - 1);
+function changeWarp(world, delta) {
+  world.warpIndex = constrain(world.warpIndex + delta, 0, WARP_LEVELS.length - 1);
+}
+
+function keyPressed() {
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "SELECT") return; // saisie dans le panneau
+  const { world, view } = app;
+  if ((key === "r" || key === "R") && world.ship.crashed) {
+    resetShip(world);
+    recenterCamera(view, world.ship);
+    return;
+  }
+  if (key === "p" || key === "P") {
+    if (world.mode === "planning") launchPlan(world, view);
+    else enterPlanning(world, view);
+    syncPanel(world, view);
+    return;
+  }
+  if (world.mode === "flight") {
+    if (key === "c" || key === "C") toggleCamera(view);
+    if (key === ".") changeWarp(world, 1);
+    if (key === ",") changeWarp(world, -1);
+    if ((key === "f" || key === "F") && world.ship.landed) world.ship.fuel = FUEL_MAX;
+    return;
+  }
+  if (keyCode === DELETE || keyCode === BACKSPACE) {
+    deleteSelectedNode(world, view);
+    syncPanel(world, view);
+    return false;
+  }
+  if (keyCode === ESCAPE) {
+    view.selectedNodeId = null;
+    syncPanel(world, view);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Interface (boutons + panneaux, définis dans index.html)
 // ---------------------------------------------------------------------------
 
-function setupUI() {
+// références DOM (singletons de la page, pas de l'état de jeu)
+const ui = {};
+
+function setupUI(app) {
   const byId = (id) => document.getElementById(id);
   Object.assign(ui, {
     plan: byId("btn-plan"),
@@ -1934,59 +1981,60 @@ function setupUI() {
   addOption(sun, 0);
   ui.target.value = "moon";
 
-  // rend la main au clavier du jeu après un clic sur un bouton
+  // chaque action reçoit l'état courant ; le panneau est resynchronisé
+  // après coup, et le clavier rendu au jeu
   const onClick = (el, fn) =>
     el.addEventListener("click", () => {
-      fn();
+      fn(app.world, app.view);
+      syncPanel(app.world, app.view);
       el.blur();
     });
   onClick(ui.plan, enterPlanning);
   onClick(ui.launch, launchPlan);
   onClick(ui.clear, clearPlan);
   onClick(ui.circularize, circularizeOrbit);
-  onClick(ui.land, () => (ui.landAngle.value === "" ? planLanding() : planLandingAt(+ui.landAngle.value)));
+  onClick(ui.land, (world, view) => (ui.landAngle.value === "" ? planLanding(world, view) : planLandingAt(world, view, +ui.landAngle.value)));
   onClick(ui.remove, deleteSelectedNode);
-  onClick(ui.camera, toggleCamera);
-  onClick(ui.warpUp, () => changeWarp(1));
-  onClick(ui.warpDown, () => changeWarp(-1));
-  onClick(ui.warp, () => (warpIndex = 0));
-  onClick(ui.route, () => {
-    routeMessage = { text: "Calcul de la route…", error: false };
-    ui.routeInfo.textContent = routeMessage.text;
+  onClick(ui.camera, (world, view) => toggleCamera(view));
+  onClick(ui.warpUp, (world) => changeWarp(world, 1));
+  onClick(ui.warpDown, (world) => changeWarp(world, -1));
+  onClick(ui.warp, (world) => (world.warpIndex = 0));
+  onClick(ui.route, (world, view) => {
+    view.routeMessage = { text: "Calcul de la route…", error: false };
+    ui.routeInfo.textContent = view.routeMessage.text;
     ui.route.disabled = true;
     // laisse le navigateur afficher le message avant le calcul
     setTimeout(() => {
-      computeRoute();
+      computeRoute(app.world, app.view, ui.target.value, Number(ui.altitude.value));
+      syncPanel(app.world, app.view);
       ui.route.disabled = false;
     }, 30);
   });
 
-  ui.time.addEventListener("input", () => updateSelectedNode({ t: gameTime + Number(ui.time.value) }));
-  ui.heading.addEventListener("input", () => updateSelectedNode({ heading: Number(ui.heading.value) }));
-  ui.power.addEventListener("input", () => updateSelectedNode({ power: Number(ui.power.value) / 100 }));
-  ui.duration.addEventListener("input", () => updateSelectedNode({ duration: Number(ui.duration.value) }));
+  const onInput = (el, changes) => el.addEventListener("input", () => updateSelectedNode(app.world, app.view, changes()));
+  onInput(ui.time, () => ({ t: app.world.time + Number(ui.time.value) }));
+  onInput(ui.heading, () => ({ heading: Number(ui.heading.value) }));
+  onInput(ui.power, () => ({ power: Number(ui.power.value) / 100 }));
+  onInput(ui.duration, () => ({ duration: Number(ui.duration.value) }));
   for (const preset of document.querySelectorAll("[data-heading]")) {
-    onClick(preset, () => {
-      updateSelectedNode({ heading: Number(preset.dataset.heading) });
-      syncPanel();
-    });
+    onClick(preset, (world, view) => updateSelectedNode(world, view, { heading: Number(preset.dataset.heading) }));
   }
 }
 
 // recopie la manœuvre sélectionnée dans les curseurs
-function syncPanel() {
-  const node = selectedNode();
+function syncPanel(world, view) {
+  const node = world.mode === "planning" ? selectedNode(world, view) : null;
   ui.panel.hidden = !node;
   if (!node) return;
-  ui.time.max = Math.ceil(Math.max(300, node.t - gameTime + 60));
-  ui.time.value = node.t - gameTime;
+  ui.time.max = Math.ceil(Math.max(300, node.t - world.time + 60));
+  ui.time.value = node.t - world.time;
   ui.heading.value = node.heading;
   ui.power.value = Math.round(node.power * 100);
   ui.duration.value = node.duration;
 }
 
-function formatT(t) {
-  const dt = t - gameTime;
+function formatT(t, now) {
+  const dt = t - now;
   if (Math.abs(dt) < 600) return `T+${dt.toFixed(1)} s`;
   return `T+${Math.floor(dt / 60)} min ${Math.round(dt % 60)} s`;
 }
@@ -1996,10 +2044,12 @@ function nodeDeltaV(n, predicted) {
   return THRUST_ACCEL * n.power * n.duration;
 }
 
-function updateUI(prediction) {
-  const planning = mode === "planning";
+function updateUI(world, view, prediction) {
+  const planning = world.mode === "planning";
+  const ship = world.ship;
+  const planNodes = world.plan.nodes;
   ui.plan.hidden = planning;
-  ui.plan.disabled = !canPlan();
+  ui.plan.disabled = !canPlan(world);
   ui.launch.hidden = !planning;
   ui.clear.hidden = !planning;
   ui.clear.disabled = planNodes.length === 0;
@@ -2010,15 +2060,15 @@ function updateUI(prediction) {
   ui.land.disabled = ship.crashed;
   ui.landAngle.hidden = !planning;
   ui.targetPanel.hidden = !planning;
-  ui.routeInfo.textContent = routeMessage.text;
-  ui.routeInfo.classList.toggle("error", routeMessage.error);
+  ui.routeInfo.textContent = view.routeMessage.text;
+  ui.routeInfo.classList.toggle("error", view.routeMessage.error);
   ui.camera.hidden = planning;
-  ui.camera.classList.toggle("active", cameraFree);
-  ui.camera.textContent = cameraFree ? "🎯 Suivre le vaisseau" : "🎥 Caméra libre";
-  ui.warp.textContent = `×${WARP_LEVELS[warpIndex]}`;
+  ui.camera.classList.toggle("active", view.cameraFree);
+  ui.camera.textContent = view.cameraFree ? "🎯 Suivre le vaisseau" : "🎥 Caméra libre";
+  ui.warp.textContent = `×${WARP_LEVELS[world.warpIndex]}`;
   for (const b of [ui.warp, ui.warpUp, ui.warpDown]) b.hidden = planning;
 
-  const node = planning ? selectedNode() : null;
+  const node = planning ? selectedNode(world, view) : null;
   if (!node) {
     ui.panel.hidden = true;
     return;
@@ -2029,7 +2079,7 @@ function updateUI(prediction) {
   ui.title.textContent = landing ? `Atterrissage ${index + 1}/${planNodes.length}` : `Manœuvre ${index + 1}/${planNodes.length}`;
   for (const el of [ui.heading, ui.power, ui.duration]) el.closest("label").hidden = landing;
   ui.presets.hidden = landing;
-  ui.outTime.textContent = formatT(node.t);
+  ui.outTime.textContent = formatT(node.t, world.time);
   ui.outHeading.textContent = `${node.heading > 0 ? "+" : ""}${Math.round(node.heading)}°`;
   ui.outPower.textContent = `${Math.round(node.power * 100)} %`;
   ui.outDuration.textContent = `${node.duration.toFixed(2)} s`;
@@ -2043,13 +2093,13 @@ function updateUI(prediction) {
     if (delay > 0.05) lines.push(`Démarre ${delay.toFixed(1)} s plus tard (manœuvre précédente).`);
     lines.push(`Référentiel : ${predicted.startRef.name}`);
     if (landing) {
-      if (predicted.burnStartT !== undefined) lines.push(`Allumage : ${formatT(predicted.burnStartT)}`);
-      if (predicted.endT !== undefined) lines.push(`Posé : ${formatT(predicted.endT)} · carburant ${predicted.fuelAfter.toFixed(0)}`);
+      if (predicted.burnStartT !== undefined) lines.push(`Allumage : ${formatT(predicted.burnStartT, world.time)}`);
+      if (predicted.endT !== undefined) lines.push(`Posé : ${formatT(predicted.endT, world.time)} · carburant ${predicted.fuelAfter.toFixed(0)}`);
       else lines.push("Pas de contact prévu (crash ou horizon dépassé).");
     } else if (predicted.burnStartT !== undefined) {
       lines.push(`Rotation : ${(predicted.burnStartT - predicted.startT).toFixed(1)} s`);
       if (predicted.endT !== undefined && node.power > 0 && node.duration > 0) {
-        lines.push(`Poussée : ${formatT(predicted.burnStartT)} → ${formatT(predicted.endT)}`);
+        lines.push(`Poussée : ${formatT(predicted.burnStartT, world.time)} → ${formatT(predicted.endT, world.time)}`);
         lines.push(`Carburant : ${predicted.fuelBefore.toFixed(0)} → ${predicted.fuelAfter.toFixed(0)}`);
       }
     }
@@ -2062,7 +2112,39 @@ function updateUI(prediction) {
 // Rendu
 // ---------------------------------------------------------------------------
 
-function drawPredictedPath(pred) {
+function renderScene(world, view, prediction) {
+  const target = world.mode === "planning" ? world.plan.target : world.autopilot ? world.autopilotTarget : null;
+
+  background(6, 8, 16);
+  drawStars(view);
+
+  push();
+  translate(width / 2, height / 2);
+  scale(view.zoom);
+  translate(-view.cameraX, -view.cameraY);
+
+  drawOrbits(world, view);
+  if (prediction) drawGhostBodies(world, view, prediction);
+  for (const body of ALL_BODIES) drawBody(view, body);
+  if (prediction) {
+    drawTargetOrbit(view, prediction, target);
+    drawPredictedPath(view, prediction);
+    if (prediction.periapsis) drawApsis(view, prediction, prediction.periapsis, "Périastre", [255, 130, 130]);
+    if (prediction.apoapsis) drawApsis(view, prediction, prediction.apoapsis, "Apoastre", [130, 190, 255]);
+    drawPathEnd(view, prediction);
+    drawManeuverNodes(world, view, prediction);
+  }
+  drawShip(world, view);
+  drawVelocityVector(world, view);
+
+  pop();
+
+  drawBodyLabels(view);
+  drawHUD(world, view, prediction);
+}
+
+function drawPredictedPath(view, pred) {
+  const zoom = view.zoom;
   const pts = pred.display;
   const broken = pred.layout.broken;
   noFill();
@@ -2088,8 +2170,9 @@ function drawPredictedPath(pred) {
   drawingContext.setLineDash([]);
 }
 
-function drawPathEnd(pred) {
+function drawPathEnd(view, pred) {
   if (pred.end !== "crash" || !pred.display.length) return;
+  const zoom = view.zoom;
   const p = pred.display[pred.display.length - 1];
   const r = 6 / zoom;
   push();
@@ -2109,15 +2192,16 @@ function drawPathEnd(pred) {
 // d'une certaine taille à l'écran, on ne trace que l'arc visible — un
 // cercle pointillé de plusieurs centaines de milliers de pixels est très
 // coûteux à rasteriser
-function drawBigCircle(cx, cy, r) {
+function drawBigCircle(view, cx, cy, r) {
+  const zoom = view.zoom;
   if (r * zoom < 2000) {
     circle(cx, cy, r * 2);
     return;
   }
   const half = Math.hypot(width, height) / 2 / zoom;
-  const d = Math.hypot(cameraX - cx, cameraY - cy);
+  const d = Math.hypot(view.cameraX - cx, view.cameraY - cy);
   if (Math.abs(d - r) > half) return; // arc hors de l'écran
-  const center = Math.atan2(cameraY - cy, cameraX - cx);
+  const center = Math.atan2(view.cameraY - cy, view.cameraX - cx);
   const span = Math.min(PI, Math.asin(Math.min(1, half / r)) * 1.3);
   beginShape();
   for (let i = 0; i <= 96; i++) {
@@ -2129,7 +2213,9 @@ function drawBigCircle(cx, cy, r) {
 
 // orbite de chaque astre autour de son parent, et sphère d'influence de
 // l'astre de référence et de ses satellites
-function drawOrbits() {
+function drawOrbits(world, view) {
+  const zoom = view.zoom;
+  const ref = world.ship.ref;
   push();
   noFill();
   strokeWeight(1 / zoom);
@@ -2137,17 +2223,18 @@ function drawOrbits() {
   stroke(255, 255, 255, 70);
   for (const body of ALL_BODIES) {
     if (!body.parentBody) continue;
-    drawBigCircle(body.parentBody.x, body.parentBody.y, body.orbitRadius);
+    drawBigCircle(view, body.parentBody.x, body.parentBody.y, body.orbitRadius);
   }
   stroke(120, 170, 255, 45);
   drawingContext.setLineDash([2 / zoom, 10 / zoom]);
-  for (const body of [ship.ref, ...ship.ref.children]) {
-    if (Number.isFinite(body.soi)) drawBigCircle(body.x, body.y, body.soi);
+  for (const body of [ref, ...ref.children]) {
+    if (Number.isFinite(body.soi)) drawBigCircle(view, body.x, body.y, body.soi);
   }
   pop();
 }
 
-function drawApsis(pred, point, label, color) {
+function drawApsis(view, pred, point, label, color) {
+  const zoom = view.zoom;
   const p = displayPosition(pred, point.patch, point.rx, point.ry);
   if (!p) return;
   const body = pred.patches[point.patch].body;
@@ -2163,8 +2250,9 @@ function drawApsis(pred, point, label, color) {
 }
 
 // orbite visée par le calculateur de route, autour de l'astre à l'arrivée
-function drawTargetOrbit(pred, target) {
+function drawTargetOrbit(view, pred, target) {
   if (!target) return;
+  const zoom = view.zoom;
   let center = null;
   for (let j = pred.patches.length - 1; j >= 0; j--) {
     if (pred.patches[j].body === target.body && pred.layout.anchors[j]) {
@@ -2178,7 +2266,7 @@ function drawTargetOrbit(pred, target) {
   stroke(255, 120, 220, 170);
   strokeWeight(1.5 / zoom);
   drawingContext.setLineDash([10 / zoom, 6 / zoom]);
-  drawBigCircle(center.x, center.y, target.radius);
+  drawBigCircle(view, center.x, center.y, target.radius);
   noStroke();
   fill(255, 120, 220);
   textSize(12 / zoom);
@@ -2189,7 +2277,8 @@ function drawTargetOrbit(pred, target) {
 
 // position des astres à l'heure prévue de chaque manœuvre (fantômes), dans
 // le repère du patch où se trouve la manœuvre
-function drawGhostBodies(pred) {
+function drawGhostBodies(world, view, pred) {
+  const zoom = view.zoom;
   push();
   // astre rencontré en route : dessiné là où il sera au moment de la rencontre
   const { anchors, broken, current } = pred.layout;
@@ -2202,7 +2291,7 @@ function drawGhostBodies(pred) {
     fill(255, 200);
     textSize(11 / zoom);
     textAlign(CENTER, TOP);
-    text(`${body.name} à l'arrivée (${formatT(pred.patches[j].t)})`, anchors[j].x, anchors[j].y + Math.max(body.radius, 4 / zoom) + 4 / zoom);
+    text(`${body.name} à l'arrivée (${formatT(pred.patches[j].t, world.time)})`, anchors[j].x, anchors[j].y + Math.max(body.radius, 4 / zoom) + 4 / zoom);
   }
   drawingContext.setLineDash([4 / zoom, 4 / zoom]);
   for (const pn of pred.nodes) {
@@ -2211,7 +2300,7 @@ function drawGhostBodies(pred) {
     if (!anchor) continue;
     const frameBody = pred.patches[pn.startPatch].body;
     const framePos = bodyPositionAt(frameBody, pn.startT);
-    const highlighted = pn.id === selectedNodeId;
+    const highlighted = pn.id === view.selectedNodeId;
     // les satellites de l'astre du patch (ex : la Lune autour de la Terre,
     // les planètes autour du Soleil) — l'astre du patch lui-même reste fixe
     for (const body of frameBody.children) {
@@ -2221,26 +2310,27 @@ function drawGhostBodies(pred) {
       noFill();
       stroke(...body.color, highlighted ? 220 : 80);
       strokeWeight((highlighted ? 2 : 1) / zoom);
-      drawBigCircle(x, y, Math.max(body.radius, 4 / zoom));
+      drawBigCircle(view, x, y, Math.max(body.radius, 4 / zoom));
       if (highlighted) {
         noStroke();
         fill(255, 220);
         textSize(11 / zoom);
         textAlign(CENTER, TOP);
-        text(`${body.name} à ${formatT(pn.startT)}`, x, y + Math.max(body.radius, 4 / zoom) + 4 / zoom);
+        text(`${body.name} à ${formatT(pn.startT, world.time)}`, x, y + Math.max(body.radius, 4 / zoom) + 4 / zoom);
       }
     }
   }
   pop();
 }
 
-function drawManeuverNodes(pred) {
+function drawManeuverNodes(world, view, pred) {
+  const zoom = view.zoom;
   push();
   pred.nodes.forEach((pn, i) => {
     if (pn.startT === undefined) return;
     const p = displayPosition(pred, pn.startPatch, pn.startX, pn.startY);
     if (!p) return;
-    const selected = pn.id === selectedNodeId;
+    const selected = pn.id === view.selectedNodeId;
 
     // direction de poussée, au point où la poussée commence
     if (pn.kind !== "land" && pn.burnStartT !== undefined && pn.power > 0 && pn.duration > 0) {
@@ -2274,29 +2364,29 @@ function drawManeuverNodes(pred) {
     fill(255);
     textSize(11 / zoom);
     textAlign(LEFT, BOTTOM);
-    const when = pn.startT < gameTime ? "en cours" : formatT(pn.startT);
+    const when = pn.startT < world.time ? "en cours" : formatT(pn.startT, world.time);
     const label = pn.kind === "land" ? " · atterrissage" : "";
     text(`M${pred.firstNode + i + 1} · ${when}${label}`, p.x + 9 / zoom, p.y - 6 / zoom);
   });
   pop();
 }
 
-function drawStars() {
+function drawStars(view) {
   randomSeed(1);
   noStroke();
   fill(255, 255, 255, 150);
   for (let i = 0; i < 200; i++) {
-    const x = (random(-2000, 2000) - cameraX * 0.02) % width;
-    const y = (random(-2000, 2000) - cameraY * 0.02) % height;
+    const x = (random(-2000, 2000) - view.cameraX * 0.02) % width;
+    const y = (random(-2000, 2000) - view.cameraY * 0.02) % height;
     circle((x + width) % width, (y + height) % height, 2);
   }
 }
 
-function drawBody(body) {
+function drawBody(view, body) {
   if (body.atmosphere) drawAtmosphere(body);
   noStroke();
   fill(...body.color);
-  circle(body.x, body.y, Math.max(body.radius * 2, 6 / zoom));
+  circle(body.x, body.y, Math.max(body.radius * 2, 6 / view.zoom));
 }
 
 // halo translucide (anneaux concentriques, de plus en plus transparents vers
@@ -2317,56 +2407,61 @@ function drawAtmosphere(body) {
 }
 
 // nom des astres trop petits à l'écran pour être reconnus
-function drawBodyLabels() {
+function drawBodyLabels(view) {
   noStroke();
   textSize(11);
   textAlign(CENTER, TOP);
   for (const body of ALL_BODIES) {
-    if (body.radius * zoom > 12) continue;
-    const s = worldToScreen(body.x, body.y);
+    if (body.radius * view.zoom > 12) continue;
+    const s = worldToScreen(view, body.x, body.y);
     if (s.x < -50 || s.y < -50 || s.x > width + 50 || s.y > height + 50) continue;
     fill(255, 170);
     text(body.name, s.x, s.y + 6);
   }
 }
 
-function drawShip() {
+function drawShip(world, view) {
+  const ship = world.ship;
   push();
   translate(ship.x, ship.y);
   rotate(ship.angle);
   // taille minimale à l'écran pour ne pas perdre le vaisseau en dézoomant
-  const k = Math.max(1, 6 / (ship.size * zoom));
+  const k = Math.max(1, 6 / (ship.size * view.zoom));
   scale(k);
   noStroke();
   fill(ship.crashed ? [200, 60, 60] : [255, 220, 120]);
   triangle(-ship.size / 2, -ship.size / 2, -ship.size / 2, ship.size / 2, ship.size / 2, 0);
-  if (ship.thrusting && !ship.crashed && mode === "flight") {
+  if (ship.thrusting && !ship.crashed && world.mode === "flight") {
     fill(255, 140, 40);
     triangle(-ship.size / 2, -ship.size / 4, -ship.size / 2, ship.size / 4, -ship.size - 8, 0);
   }
   pop();
 }
 
-function drawVelocityVector() {
+function drawVelocityVector(world, view) {
+  const ship = world.ship;
   // vitesse relative au référentiel actif (comme le mode "Surface/Orbit" de Kerbal)
   const scaleFactor = 0.5;
   stroke(100, 220, 255, 200);
-  strokeWeight(2 / zoom);
+  strokeWeight(2 / view.zoom);
   line(ship.x, ship.y, ship.x + ship.rvx * scaleFactor, ship.y + ship.rvy * scaleFactor);
 }
 
-function autopilotStatus() {
+function autopilotStatus(world) {
+  const autopilot = world.autopilot;
   if (!autopilot) return "";
   const node = autopilot.nodes[autopilot.index];
   const label = `Plan : manœuvre ${autopilot.index + 1}/${autopilot.nodes.length}`;
   if (!node) return label;
   if (autopilot.phase === "landing") return `${label} — atterrissage guidé`;
   if (autopilot.phase === "rotating") return `${label} — rotation vers le cap`;
-  if (autopilot.phase === "burning") return `${label} — poussée (reste ${Math.max(0, autopilot.burnEnd - gameTime).toFixed(1)} s)`;
-  return `${label} — dans ${formatT(node.t).replace("T+", "")}`;
+  if (autopilot.phase === "burning") return `${label} — poussée (reste ${Math.max(0, autopilot.burnEnd - world.time).toFixed(1)} s)`;
+  return `${label} — dans ${formatT(node.t, world.time).replace("T+", "")}`;
 }
 
-function drawHUD(referenceBody, prediction) {
+function drawHUD(world, view, prediction) {
+  const ship = world.ship;
+  const referenceBody = ship.ref;
   const relSpeed = Math.hypot(ship.rvx, ship.rvy);
   const r = Math.hypot(ship.rx, ship.ry);
   const altitude = r - referenceBody.radius;
@@ -2377,48 +2472,49 @@ function drawHUD(referenceBody, prediction) {
   textSize(14);
   textAlign(LEFT, TOP);
   const status =
-    mode === "planning"
+    world.mode === "planning"
       ? "⏸ PAUSE — planification"
       : ship.crashed
       ? ship.crashReason === "chaleur"
         ? "CRASH — le vaisseau s'est consumé dans l'atmosphère — [R] pour relancer"
         : "CRASH — [R] pour relancer"
-      : autopilot
-      ? autopilotStatus()
+      : world.autopilot
+      ? autopilotStatus(world)
       : ship.landed
       ? "Posé — [↑] pour décoller · [F] faire le plein"
       : "";
-  const warp = effectiveWarp();
+  const warp = effectiveWarp(world);
+  const warpLevel = WARP_LEVELS[world.warpIndex];
   const lines = [
     `Référentiel : ${referenceBody.name}`,
     `Vitesse relative : ${relSpeed.toFixed(1)}`,
     `Altitude : ${Math.max(0, altitude).toFixed(0)}`,
     `Vitesse orbitale visée : ${orbitalV.toFixed(1)}`,
     ship.landed ? "" : `Vitesse de rotation : ${degrees(ship.angularVelocity).toFixed(0)}°/s`,
-    mode === "flight" && WARP_LEVELS[warpIndex] > 1 ? `Temps accéléré ×${Math.round(warp)}${warp < WARP_LEVELS[warpIndex] ? " (manœuvre proche)" : ""}` : "",
+    world.mode === "flight" && warpLevel > 1 ? `Temps accéléré ×${Math.round(warp)}${warp < warpLevel ? " (manœuvre proche)" : ""}` : "",
     status,
   ];
   lines.forEach((l, i) => text(l, 16, 16 + i * 20));
 
   let y = 16 + lines.length * 20 + 4;
-  drawFuelGauge(16, y, prediction);
+  drawFuelGauge(world, 16, y, prediction);
   y += 34;
   if (referenceBody.atmosphere || ship.heat > 1) {
-    drawHeatGauge(16, y);
+    drawHeatGauge(ship, 16, y);
     y += 34;
   }
   if (!ship.landed && !ship.crashed) {
-    drawRotationIndicator(16, y);
+    drawRotationIndicator(ship, 16, y);
     y += 40;
   }
 
-  if (mode === "planning") drawPlanSummary(16, y, prediction);
+  if (world.mode === "planning") drawPlanSummary(world, view, 16, y, prediction);
 
   fill(255, 220);
   textSize(14);
   textAlign(LEFT, BOTTOM);
   const controlLines =
-    mode === "planning"
+    world.mode === "planning"
       ? [
           "Clic sur le tracé : ajouter une manœuvre · clic sur un point : la sélectionner · glisser un point : le déplacer",
           "Glisser le fond : déplacer la vue · molette : zoom · [Suppr] effacer la manœuvre · [Échap] désélectionner",
@@ -2429,7 +2525,7 @@ function drawHUD(referenceBody, prediction) {
       : [
           "↑ poussée · ←/→ maintenir pour tourner, tapoter pour ajuster finement (inertie, sans frottement)",
           "[C] caméra libre (glisser / molette) · [,] [.] accélérer le temps",
-          autopilot ? "Pilote automatique actif — une touche fléchée reprend la main" : "Pointillés verts : trajectoire prédite (sans poussée)",
+          world.autopilot ? "Pilote automatique actif — une touche fléchée reprend la main" : "Pointillés verts : trajectoire prédite (sans poussée)",
           "[P] ou « Planifier » : pause et planification de la trajectoire",
         ];
   controlLines.forEach((l, i) => {
@@ -2438,7 +2534,8 @@ function drawHUD(referenceBody, prediction) {
 }
 
 // jauge de carburant ; en planification, marque ce qui restera après le plan
-function drawFuelGauge(x, y, prediction) {
+function drawFuelGauge(world, x, y, prediction) {
+  const ship = world.ship;
   const w = 180;
   const h = 8;
   const ratio = ship.fuel / FUEL_MAX;
@@ -2449,7 +2546,7 @@ function drawFuelGauge(x, y, prediction) {
   rect(x, y + 16, w * ratio, h, 3);
 
   let label = `Carburant (Δv) : ${ship.fuel.toFixed(0)} / ${FUEL_MAX} · dépensé ${(FUEL_MAX - ship.fuel).toFixed(0)}`;
-  if (mode === "planning" && prediction && planNodes.length) {
+  if (world.mode === "planning" && prediction && world.plan.nodes.length) {
     const after = prediction.finalState.fuel;
     fill(255, 230, 120);
     rect(x + w * (after / FUEL_MAX) - 1, y + 13, 2, h + 6);
@@ -2464,7 +2561,7 @@ function drawFuelGauge(x, y, prediction) {
 
 // jauge d'échauffement atmosphérique : vide tant qu'on est dans le vide,
 // monte dans l'atmosphère avec la vitesse, pleine = destruction
-function drawHeatGauge(x, y) {
+function drawHeatGauge(ship, x, y) {
   const w = 180;
   const h = 8;
   const ratio = constrain(ship.heat / HEAT_MAX, 0, 1);
@@ -2479,7 +2576,8 @@ function drawHeatGauge(x, y) {
   text(`Échauffement : ${Math.round(ratio * 100)} %${ratio > 0.7 ? " ⚠" : ""}`, x, y);
 }
 
-function drawPlanSummary(x, y, prediction) {
+function drawPlanSummary(world, view, x, y, prediction) {
+  const planNodes = world.plan.nodes;
   textSize(13);
   textAlign(LEFT, TOP);
   noStroke();
@@ -2493,10 +2591,10 @@ function drawPlanSummary(x, y, prediction) {
   const maxLines = Math.max(3, Math.floor((height - y - 160) / 18));
   planNodes.slice(0, maxLines).forEach((node, i) => {
     const predicted = prediction && prediction.nodes.find((n) => n.id === node.id);
-    const start = predicted && predicted.startT !== undefined ? `${formatT(predicted.startT)} (${predicted.startRef.name})` : "non atteinte";
+    const start = predicted && predicted.startT !== undefined ? `${formatT(predicted.startT, world.time)} (${predicted.startRef.name})` : "non atteinte";
     const burn = node.power > 0 && node.duration > 0 ? `Δv ${nodeDeltaV(node).toFixed(1)}` : "rotation seule";
     const what = node.kind === "land" ? `atterrissage guidé · Δv ${nodeDeltaV(node, predicted).toFixed(1)}` : `cap ${Math.round(node.heading)}° · ${burn}`;
-    fill(node.id === selectedNodeId ? [255, 230, 120] : [255, 255, 255, 200]);
+    fill(node.id === view.selectedNodeId ? [255, 230, 120] : [255, 255, 255, 200]);
     text(`M${i + 1} · ${start} · ${what}`, x, y + 18 + i * 18);
   });
   if (planNodes.length > maxLines) {
@@ -2505,7 +2603,7 @@ function drawPlanSummary(x, y, prediction) {
   }
 }
 
-function drawRotationIndicator(x, y) {
+function drawRotationIndicator(ship, x, y) {
   const maxNotches = 6;
   const notchSize = 10;
   const gap = 3;
@@ -2542,33 +2640,4 @@ function drawRotationIndicator(x, y) {
     ? `tourne à droite — ${count} appui(s) gauche pour stabiliser`
     : "rotation stable";
   text(msg, x, y + notchSize + 4);
-}
-
-function keyPressed() {
-  const tag = document.activeElement && document.activeElement.tagName;
-  if (tag === "INPUT" || tag === "SELECT") return; // saisie dans le panneau
-  if ((key === "r" || key === "R") && ship.crashed) {
-    resetShip();
-    return;
-  }
-  if (key === "p" || key === "P") {
-    if (mode === "planning") launchPlan();
-    else enterPlanning();
-    return;
-  }
-  if (mode === "flight") {
-    if (key === "c" || key === "C") toggleCamera();
-    if (key === ".") changeWarp(1);
-    if (key === ",") changeWarp(-1);
-    if ((key === "f" || key === "F") && ship.landed) ship.fuel = FUEL_MAX;
-    return;
-  }
-  if (keyCode === DELETE || keyCode === BACKSPACE) {
-    deleteSelectedNode();
-    return false;
-  }
-  if (keyCode === ESCAPE) {
-    selectedNodeId = null;
-    syncPanel();
-  }
 }
