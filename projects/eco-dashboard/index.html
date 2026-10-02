@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>eco-dashboard — mécaniques socio-économiques</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <h1>Mécaniques socio-économiques <small>POC #12</small></h1>
+    <div id="status"></div>
+    <div class="controls">
+      <label>Joueurs <select id="cfg-players"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label>Graine <input id="cfg-seed" type="number" value="1" min="1" /></label>
+      <button id="btn-new" type="button">Nouvelle partie</button>
+      <button id="btn-end" class="primary" type="button">Fin du tour ▶</button>
+      <button id="btn-sim" type="button">Simuler 5 tours</button>
+      <button id="btn-sim-end" type="button">Jusqu'à la fin</button>
+    </div>
+  </header>
+  <div id="ending" hidden></div>
+  <div id="toast" hidden></div>
+
+  <main>
+    <section id="players" class="grid"></section>
+
+    <section class="panel" id="actions">
+      <h2>Agir en tant que <select id="actor"></select> <span id="actor-summary" class="muted"></span></h2>
+      <div class="action-grid">
+        <form id="f-research" class="box">
+          <h3>Recherche</h3>
+          <p class="muted">Outillage payé une fois par techno (argent + métaux), puis salaire de chaque chercheur à chaque tour, affecté ou non. L'expérience (paliers à 2 et 4 tours sur la même recherche) augmente la chance ; retirer un chercheur d'une recherche en cours la lui fait perdre.</p>
+          <div class="row">
+            <label>Équipe <input name="hireQty" type="number" min="1" value="1" /></label>
+            <button type="button" data-act="hire">Embaucher</button>
+            <button type="button" data-act="fire">Licencier</button>
+          </div>
+          <p class="hint" data-hint="staff"></p>
+          <div class="row">
+            <select name="tech"></select>
+            <label>Chercheurs <input name="researchers" type="number" min="1" value="2" /></label>
+          </div>
+          <div class="row">
+            <button type="submit" data-act="assign">Affecter</button>
+            <button type="button" data-act="stop">Arrêter</button>
+          </div>
+          <p class="hint" data-hint="tech"></p>
+          <p class="hint" data-hint="research-active"></p>
+        </form>
+
+        <form id="f-mission" class="box">
+          <h3>Vaisseau</h3>
+          <p class="muted">Composez un vaisseau avec votre matériel et votre équipe plutôt que d'attendre toute une chaîne de technologies : la réussite dépend de l'entraînement de l'équipage et du budget engagé, mais tout est perdu en cas d'échec.</p>
+          <div class="row">
+            <select name="mission"></select>
+          </div>
+          <div class="row">
+            <label>₵ <input name="money" type="number" min="0" placeholder="budget" /></label>
+            <label>Métaux <input name="material" type="number" min="0" placeholder="matériel" /></label>
+            <button type="submit">Lancer</button>
+          </div>
+          <p class="hint" data-hint="mission"></p>
+        </form>
+
+        <form id="f-build" class="box">
+          <h3>Construire</h3>
+          <div class="row">
+            <select name="type"></select>
+            <select name="zone"></select>
+          </div>
+          <div class="row">
+            <label><input type="radio" name="mode" value="prudent" checked /> prudent</label>
+            <label><input type="radio" name="mode" value="agressif" /> agressif</label>
+            <button type="submit">Construire</button>
+          </div>
+          <p class="hint" data-hint="build"></p>
+          <div class="row">
+            <select name="infra"></select>
+            <button type="button" data-act="dismantle">Démanteler</button>
+          </div>
+        </form>
+
+        <form id="f-market" class="box">
+          <h3>Marché</h3>
+          <div class="row">
+            <select name="rare"></select>
+            <label>Mon prix <input name="price" type="number" min="1" value="5" /></label>
+            <button type="button" data-act="price">Fixer</button>
+          </div>
+          <div class="row">
+            <select name="seller"></select>
+            <label>Qté <input name="qty" type="number" min="1" value="1" /></label>
+            <button type="submit">Acheter</button>
+          </div>
+          <p class="hint" data-hint="market"></p>
+          <div class="row">
+            <label>Droit de ravitaillement <input name="fuelFee" type="number" min="0" value="4" /> ₵/ergol</label>
+            <button type="button" data-act="fuel">Fixer</button>
+          </div>
+        </form>
+
+        <form id="f-trade" class="box wide">
+          <h3>Troc / demande de compensation</h3>
+          <div class="row">
+            <label>Avec <select name="to"></select></label>
+            <label class="grow">Note <input name="note" type="text" placeholder="ex : compensation pour ma mine" /></label>
+          </div>
+          <div class="bundles">
+            <fieldset data-side="give">
+              <legend>Je donne</legend>
+              <label>₵ <input name="money" type="number" min="0" value="0" /></label>
+              <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
+              <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
+              <label>Licence <select name="tech"></select></label>
+              <label>Parts de <select name="shareCo"></select> <input name="shareQty" type="number" min="0" value="0" /></label>
+            </fieldset>
+            <fieldset data-side="want">
+              <legend>Je demande</legend>
+              <label>₵ <input name="money" type="number" min="0" value="0" /></label>
+              <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
+              <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
+              <label>Licence <select name="tech"></select></label>
+              <label>Parts de <select name="shareCo"></select> <input name="shareQty" type="number" min="0" value="0" /></label>
+            </fieldset>
+          </div>
+          <button type="submit">Proposer</button>
+        </form>
+
+        <form id="f-loan" class="box">
+          <h3>Prêt</h3>
+          <div class="row">
+            <select name="dir">
+              <option value="from">Je prête à</option>
+              <option value="to">J'emprunte à</option>
+            </select>
+            <select name="other"></select>
+          </div>
+          <div class="row">
+            <label>₵ <input name="money" type="number" min="0" value="20" /></label>
+            <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
+          </div>
+          <div class="row">
+            <label>Rembourser <input name="repay" type="number" min="0" value="25" /> ₵</label>
+            <label>dans <input name="due" type="number" min="1" placeholder="∞" value="3" /> tours</label>
+          </div>
+          <p class="muted">Délai vide = sans condition (remboursement libre). Montant 0 = don.</p>
+          <button type="submit">Proposer</button>
+        </form>
+
+        <form id="f-buyout" class="box">
+          <h3>Rachat</h3>
+          <p class="muted">Possible si la cible est en faillite ou si vous détenez ≥ 51 parts.</p>
+          <div class="row">
+            <select name="target"></select>
+            <button type="submit">Racheter</button>
+          </div>
+          <p class="hint" data-hint="buyout"></p>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Menaces et projets communs</h2>
+      <div id="threats"></div>
+      <div class="action-grid">
+        <form id="f-project" class="box wide">
+          <h3>Projet commun</h3>
+          <p class="muted">Tout le monde peut verser : la propriété suit les apports, le plus gros contributeur contrôle. Une promesse est visible mais n'engage à rien.</p>
+          <div class="row">
+            <select name="type"></select>
+            <select name="zone"></select>
+            <button type="button" data-act="create">Lancer</button>
+          </div>
+          <p class="hint" data-hint="project-type"></p>
+          <div class="row">
+            <label>Projet <select name="project"></select></label>
+            <label>Promettre <input name="pledge" type="number" min="0" value="100" /> ₵</label>
+            <button type="button" data-act="pledge">Promettre</button>
+          </div>
+          <div class="row">
+            <label>₵ <input name="money" type="number" min="0" value="0" /></label>
+            <label>Métaux <input name="material" type="number" min="0" value="0" /></label>
+            <label><select name="rare"></select> <input name="rareQty" type="number" min="0" value="0" /></label>
+            <button type="submit">Verser</button>
+          </div>
+          <div class="row">
+            <label>Armada <select name="mode"><option value="défense">défense</option><option value="conquête">conquête</option><option value="exploration">exploration</option></select></label>
+            <button type="button" data-act="mode">Changer de mode</button>
+            <label>Cible <select name="target"></select></label>
+            <button type="button" data-act="attack">Attaquer</button>
+          </div>
+          <p class="hint" data-hint="project"></p>
+        </form>
+      </div>
+      <div id="projects"></div>
+    </section>
+
+    <section class="panel two-col">
+      <div>
+        <h2>Offres en cours</h2>
+        <div id="offers"></div>
+      </div>
+      <div>
+        <h2>Prêts et dettes</h2>
+        <div id="loans"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Qui lèse / avantage qui</h2>
+      <div id="relations"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Indicateurs pour les questions ouvertes</h2>
+      <div id="indicators" class="ind-grid"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Journal <select id="log-filter"></select> <select id="log-type"></select></h2>
+      <ol id="log"></ol>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+  <script src="strategies.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>

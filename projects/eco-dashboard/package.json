@@ -1,0 +1,14 @@
+{
+  "name": "eco-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "serve . -l 3001",
+    "build": "echo \"static dashboard, nothing to build\"",
+    "sim": "node sim.js",
+    "check": "node check-tree.js"
+  },
+  "devDependencies": {
+    "serve": "^14.2.1"
+  }
+}

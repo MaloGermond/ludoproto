@@ -35,6 +35,18 @@ const FUEL_MAX = 500;
 const LANDING_MAX_ANGLE = (45 * Math.PI) / 180;
 const LANDING_MAX_SPEED = 120;
 
+// atmosphère : seuls certains astres en ont une (cf. BODY_CONFIGS, champ
+// `atmosphere`). Densité décroissante avec l'altitude (échelle = hauteur/5,
+// approximation d'une vraie atmosphère) ; parkingRadius() tient compte de la
+// hauteur pour qu'une orbite de parking normale reste au-dessus, mais une
+// orbite basse ou un passage au ras du sol la traversent franchement. Elle
+// freine (traînée en v²) et échauffe (flux en v³) le vaisseau ; au-delà de
+// HEAT_MAX, il se consume.
+const DRAG_COEFF = 0.0035; // accél. de freinage = DRAG_COEFF × densité × vitesse²
+const HEAT_RATE = 0.00004; // gain de chaleur/s = HEAT_RATE × densité × vitesse³
+const HEAT_COOLING = 3; // perte de chaleur/s par rayonnement, même hors atmosphère
+const HEAT_MAX = 100;
+
 // rotation façon RCS spatial : maintenir ←/→ accélère en continu la vitesse
 // angulaire, un tapotement bref ne fait qu'un petit ajustement. Sans
 // frottement, la vitesse angulaire persiste jusqu'à ce qu'on la contre.
@@ -94,17 +106,35 @@ const PHASE_STYLES = {
 // chaque astre pour y orbiter.
 // ---------------------------------------------------------------------------
 
+// Masses choisies pour que la gravité de surface (g = G·masse/rayon²) varie
+// vraiment d'un astre à l'autre, à l'image des écarts réels (une planète
+// tellurique dense tire fort, une petite lune est quasi flottante) — avant
+// cette passe, masse et rayon avaient été choisis en proportion l'un de
+// l'autre pour l'espacement des sphères d'influence, ce qui aplatissait
+// g à peu près au même niveau partout. Les géantes gazeuses gardent leur
+// masse d'origine : la grossir pour coller à leur vraie gravité ferait
+// déborder leur sphère d'influence sur l'orbite de Mars (cf. essais).
 const BODY_CONFIGS = [
   { id: "sun", name: "Soleil", parent: null, radius: 900, mass: 40000, color: [255, 210, 90] },
-  { id: "mercury", name: "Mercure", parent: "sun", orbitRadius: 3500, phase: 200, radius: 50, mass: 60, color: [180, 170, 160] },
-  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 1000, color: [230, 200, 140] },
-  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200] },
-  { id: "moon", name: "Lune", parent: "earth", orbitRadius: 2200, phase: 60, radius: 60, mass: 120, color: [180, 180, 180] },
-  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 500, color: [210, 120, 80] },
+  { id: "mercury", name: "Mercure", parent: "sun", orbitRadius: 3500, phase: 200, radius: 50, mass: 35, color: [180, 170, 160] },
+  { id: "venus", name: "Vénus", parent: "sun", orbitRadius: 6500, phase: 140, radius: 150, mass: 750, color: [230, 200, 140], atmosphere: { height: 130, density: 2.2, color: [235, 210, 150] } },
+  { id: "earth", name: "Terre", parent: "sun", orbitRadius: 12000, phase: 0, radius: 220, mass: 1800, color: [90, 140, 200], atmosphere: { height: 150, density: 1, color: [150, 190, 255] } },
+  { id: "moon", name: "Lune", parent: "earth", orbitRadius: 2200, phase: 60, radius: 60, mass: 22, color: [180, 180, 180] },
+  { id: "mars", name: "Mars", parent: "sun", orbitRadius: 19000, phase: 70, radius: 120, mass: 200, color: [210, 120, 80], atmosphere: { height: 75, density: 0.4, color: [220, 160, 120] } },
+  { id: "phobos", name: "Phobos", parent: "mars", orbitRadius: 500, phase: 30, radius: 15, mass: 1, color: [140, 130, 120] },
+  { id: "deimos", name: "Déimos", parent: "mars", orbitRadius: 1000, phase: 210, radius: 12, mass: 1, color: [150, 140, 130] },
   { id: "jupiter", name: "Jupiter", parent: "sun", orbitRadius: 36000, phase: 250, radius: 500, mass: 3000, color: [220, 180, 140] },
+  { id: "io", name: "Io", parent: "jupiter", orbitRadius: 1900, phase: 0, radius: 45, mass: 14, color: [230, 210, 120] },
+  { id: "europa", name: "Europe", parent: "jupiter", orbitRadius: 3600, phase: 90, radius: 40, mass: 8, color: [210, 200, 190] },
+  { id: "ganymede", name: "Ganymède", parent: "jupiter", orbitRadius: 6500, phase: 180, radius: 55, mass: 16, color: [160, 150, 140] },
+  { id: "callisto", name: "Callisto", parent: "jupiter", orbitRadius: 10500, phase: 270, radius: 50, mass: 12, color: [120, 110, 100] },
   { id: "saturn", name: "Saturne", parent: "sun", orbitRadius: 68000, phase: 320, radius: 420, mass: 1500, color: [230, 210, 160] },
+  { id: "titan", name: "Titan", parent: "saturn", orbitRadius: 6000, phase: 45, radius: 65, mass: 22, color: [220, 180, 110], atmosphere: { height: 65, density: 1.3, color: [210, 160, 90] } },
   { id: "uranus", name: "Uranus", parent: "sun", orbitRadius: 108000, phase: 30, radius: 260, mass: 600, color: [160, 220, 230] },
+  { id: "titania", name: "Titania", parent: "uranus", orbitRadius: 5500, phase: 120, radius: 35, mass: 2, color: [180, 190, 195] },
   { id: "neptune", name: "Neptune", parent: "sun", orbitRadius: 160000, phase: 170, radius: 250, mass: 600, color: [100, 140, 230] },
+  // orbite rétrograde (comme dans la réalité) : vitesse de Kepler forcée en négatif
+  { id: "triton", name: "Triton", parent: "neptune", orbitRadius: 6500, orbitSpeed: -0.00132, phase: 80, radius: 40, mass: 5, color: [230, 220, 210] },
 ];
 
 const ALL_BODIES = BODY_CONFIGS.filter((c) => c.enabled !== false).map((c) => ({ ...c, x: 0, y: 0, vx: 0, vy: 0, children: [] }));
@@ -112,6 +142,7 @@ const bodyById = Object.fromEntries(ALL_BODIES.map((b) => [b.id, b]));
 for (const b of ALL_BODIES) {
   b.mu = G * b.mass;
   b.parentBody = b.parent ? bodyById[b.parent] : null;
+  if (b.atmosphere) b.atmosphere.scaleHeight = b.atmosphere.height / 5;
 }
 for (const b of ALL_BODIES) {
   if (!b.parentBody) {
@@ -141,8 +172,6 @@ const sun = ALL_BODIES.find((b) => !b.parentBody);
 const planet = bodyById.earth; // astre de départ du vaisseau
 
 let ship;
-let trail = [];
-const TRAIL_MAX = 600;
 
 let gameTime = 0;
 let simAccumulator = 0;
@@ -197,9 +226,9 @@ function resetShip() {
     landedAngle: startAngle,
     thrusting: false,
     fuel: FUEL_MAX,
+    heat: 0,
   };
   syncShipAbsolute(ship, gameTime);
-  trail = [];
   autopilot = null;
   autopilotPrediction = null;
   flightPredictionDirty = true;
@@ -400,6 +429,28 @@ function stepShip(s, t, dt, control) {
     ay += Math.sin(s.angle) * THRUST_ACCEL * thrust;
   }
   s.thrusting = thrust > 0;
+
+  // atmosphère : freinage (traînée en v²) et échauffement (flux en v³),
+  // tous deux proportionnels à la densité locale (décroissance exponentielle
+  // avec l'altitude). Hors atmosphère (ou astre sans atmosphère), la jauge
+  // de chaleur ne fait que se refroidir.
+  const altitude = r - R.radius;
+  const density = R.atmosphere && altitude < R.atmosphere.height ? R.atmosphere.density * Math.exp(-Math.max(0, altitude) / R.atmosphere.scaleHeight) : 0;
+  if (density > 0) {
+    const speed = Math.hypot(s.rvx, s.rvy) || 1e-6;
+    const drag = DRAG_COEFF * density * speed * speed;
+    ax -= (drag * s.rvx) / speed;
+    ay -= (drag * s.rvy) / speed;
+    s.heat += (HEAT_RATE * density * speed * speed * speed - HEAT_COOLING) * dt;
+  } else {
+    s.heat -= HEAT_COOLING * dt;
+  }
+  s.heat = Math.max(0, s.heat);
+  if (s.heat >= HEAT_MAX) {
+    s.crashed = true;
+    s.crashReason = "chaleur";
+    return;
+  }
 
   s.rvx += ax * dt;
   s.rvy += ay * dt;
@@ -819,7 +870,8 @@ function mod(a, n) {
 }
 
 function parkingRadius(body) {
-  return body.radius + Math.max(80, body.radius * 0.5);
+  const clear = body.atmosphere ? body.atmosphere.height * 1.3 : 0;
+  return body.radius + Math.max(80, body.radius * 0.5, clear);
 }
 
 // orbite la plus haute utilisable autour d'un astre (sous les sphères
@@ -1439,10 +1491,6 @@ function advanceSimulation(elapsed) {
     stepShip(ship, gameTime, SIM_DT, control);
     gameTime += SIM_DT;
     if (ship.thrusting || ship.landed !== wasLanded) flightPredictionDirty = true;
-    if (!ship.crashed && !ship.landed) {
-      trail.push({ ref: ship.ref, rx: ship.rx, ry: ship.ry });
-      if (trail.length > TRAIL_MAX) trail.shift();
-    }
   }
   if (ship.crashed) {
     autopilot = null;
@@ -1490,7 +1538,6 @@ function draw() {
   translate(-cameraX, -cameraY);
 
   drawOrbits();
-  drawTrail();
   if (prediction) drawGhostBodies(prediction);
   for (const body of ALL_BODIES) drawBody(body);
   if (prediction) {
@@ -1588,45 +1635,128 @@ function circularizeOrbit() {
   syncPanel();
 }
 
+// séquence d'atterrissage : poussée qui annule la vitesse relative au temps
+// deorbitT (chute verticale, sans dérive latérale puisque le moment
+// cinétique devient nul), puis atterrissage guidé. Partagée par planLanding
+// (déorbite immédiatement) et planLandingAt (déorbite au moment trouvé par
+// recherche pour viser un point précis).
+function landingSequence(ctx, deorbitT) {
+  const c0 = deorbitT > ctx.t + 1e-6 ? runCtx(cloneCtx(ctx), deorbitT) : cloneCtx(ctx);
+  const nodes = [];
+  const deorbit = makeBurnNode(c0, c0.t, (s) => ({ x: -s.rvx, y: -s.rvy }));
+  let c = deorbit ? commitNode(c0, deorbit, nodes) : c0;
+  const land = { kind: "land", t: c.t, heading: 0, power: 1, duration: 0 };
+  c = cloneCtx(c);
+  land.id = nextNodeId++;
+  c.ap.nodes.push(copyNode(land));
+  nodes.push(land);
+  runCtx(c, c.t + LANDING_TIMEOUT, (cc) => !planDone(cc));
+  return { c, nodes };
+}
+
+function commitLanding(nodes, c, before, body) {
+  planNodes.push(...nodes.map(copyNode));
+  planNodes.sort((a, b) => a.t - b.t);
+  selectedNodeId = nodes[nodes.length - 1].id;
+  planDirty = true;
+  syncPanel();
+  routeMessage = {
+    text: `Atterrissage sur ${body.name} · Δv ${(before.s.fuel - c.s.fuel).toFixed(0)} · posé à ${formatT(c.t)} · angle ${degrees(c.s.landedAngle).toFixed(0)}°`,
+    error: false,
+  };
+}
+
+function checkLandingPossible(ctx, body) {
+  if (ctx.s.crashed) throw new PlanError("Le plan actuel se termine par un crash.");
+  if (ctx.s.landed) throw new PlanError(`Déjà posé sur ${body.name} à la fin du plan.`);
+  if (!body.parentBody) throw new PlanError(`Impossible de se poser sur ${body.name}.`);
+  if (body.mu / (body.radius * body.radius) > LANDING_IGNITION * THRUST_ACCEL) {
+    throw new PlanError(`Gravité de ${body.name} trop forte pour le moteur.`);
+  }
+}
+
 // ajoute, après les manœuvres déjà prévues, un atterrissage sur l'astre
-// autour duquel le vaisseau se trouve alors : poussée qui annule la vitesse
-// relative (chute verticale), puis atterrissage guidé
+// autour duquel le vaisseau se trouve alors, dès que possible
 function planLanding() {
   if (mode !== "planning" || ship.crashed) return;
   const ctx = runCtx(makeCtx(ship, gameTime, planNodes), Infinity, (c) => !planDone(c));
   const body = ctx.s.ref;
   try {
-    if (ctx.s.crashed) throw new PlanError("Le plan actuel se termine par un crash.");
-    if (ctx.s.landed) throw new PlanError(`Déjà posé sur ${body.name} à la fin du plan.`);
-    if (!body.parentBody) throw new PlanError(`Impossible de se poser sur ${body.name}.`);
-    if (body.mu / (body.radius * body.radius) > LANDING_IGNITION * THRUST_ACCEL) {
-      throw new PlanError(`Gravité de ${body.name} trop forte pour le moteur.`);
-    }
-
-    const nodes = [];
-    let c = ctx;
-    const deorbit = makeBurnNode(ctx, ctx.t, (s) => ({ x: -s.rvx, y: -s.rvy }));
-    if (deorbit) c = commitNode(ctx, deorbit, nodes);
-    const land = { kind: "land", t: c.t, heading: 0, power: 1, duration: 0 };
-    c = cloneCtx(c);
-    land.id = nextNodeId++;
-    c.ap.nodes.push(copyNode(land));
-    nodes.push(land);
-    runCtx(c, c.t + LANDING_TIMEOUT, (cc) => !planDone(cc));
+    checkLandingPossible(ctx, body);
+    const { c, nodes } = landingSequence(ctx, ctx.t);
     if (!c.s.landed || c.s.ref !== body) throw new PlanError(`L'atterrissage sur ${body.name} échoue (crash ou carburant).`);
-
-    planNodes.push(...nodes.map(copyNode));
-    planNodes.sort((a, b) => a.t - b.t);
-    selectedNodeId = land.id;
-    planDirty = true;
-    syncPanel();
-    routeMessage = {
-      text: `Atterrissage sur ${body.name} · Δv ${(ctx.s.fuel - c.s.fuel).toFixed(0)} · posé à ${formatT(c.t)}`,
-      error: false,
-    };
+    commitLanding(nodes, c, ctx, body);
   } catch (e) {
     if (!(e instanceof PlanError)) console.error(e);
     routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage.", error: true };
+  }
+}
+
+// vise un point précis de la surface (angle en degrés, 0-359°) : cherche le
+// moment du déorbitage qui y fait atterrir. Sans poussée latérale, la chute
+// est purement radiale (moment cinétique nul) : l'angle d'atterrissage ne
+// dépend que du moment du déorbitage, en croissant de façon monotone (mais
+// pas forcément uniforme, la rotation préalable du vaisseau vers le
+// rétrograde prenant un temps variable) sur une période orbitale complète —
+// il passe donc par la cible exactement une fois. Balayage grossier pour
+// repérer ce passage, puis dichotomie pour l'affiner.
+function planLandingAt(targetAngleDeg) {
+  if (mode !== "planning" || ship.crashed) return;
+  const base = runCtx(makeCtx(ship, gameTime, planNodes), Infinity, (c) => !planDone(c));
+  const body = base.s.ref;
+  try {
+    checkLandingPossible(base, body);
+    const el = orbitElements(base.s);
+    if (!el.bound || el.apoapsis >= body.soi) throw new PlanError("Orbite non liée : impossible de viser un point précis.");
+
+    const target = radians(((targetAngleDeg % 360) + 360) % 360);
+    const attempt = (t) => {
+      const { c, nodes } = landingSequence(base, t);
+      if (!c.s.landed || c.s.ref !== body) return null;
+      return { c, nodes, err: angleDiff(c.s.landedAngle, target) };
+    };
+
+    // un vrai passage par la cible change le signe de err en le faisant
+    // tendre vers 0 (somme des amplitudes petite) ; un saut de +180° à -180°
+    // (habillage de l'angle) change aussi le signe mais sans s'approcher de
+    // 0 (somme des amplitudes proche de 360°) — à ne pas confondre
+    const isCrossing = (a, b) => Math.sign(a.err) !== Math.sign(b.err) && Math.abs(a.err) + Math.abs(b.err) < PI;
+
+    const SCAN_STEPS = 16;
+    let lo = base.t;
+    let loTry = attempt(lo);
+    if (!loTry) throw new PlanError(`L'atterrissage sur ${body.name} échoue (crash ou carburant) près de cette visée.`);
+    let hi, hiTry;
+    for (let i = 1; i <= SCAN_STEPS; i++) {
+      hi = base.t + (i / SCAN_STEPS) * el.period;
+      hiTry = attempt(hi);
+      if (hiTry && isCrossing(loTry, hiTry)) break;
+      lo = hi;
+      loTry = hiTry || loTry;
+    }
+    if (!hiTry || !isCrossing(loTry, hiTry)) {
+      throw new PlanError("Impossible de viser ce point sur l'orbite actuelle.");
+    }
+    for (let i = 0; i < 18; i++) {
+      const mid = (lo + hi) / 2;
+      const midTry = attempt(mid);
+      if (!midTry) break;
+      if (Math.sign(midTry.err) === Math.sign(loTry.err)) {
+        lo = mid;
+        loTry = midTry;
+      } else {
+        hi = mid;
+        hiTry = midTry;
+      }
+    }
+    const result = Math.abs(loTry.err) < Math.abs(hiTry.err) ? loTry : hiTry;
+    if (Math.abs(result.err) >= radians(2)) {
+      throw new PlanError(`Visée imprécise (écart ${degrees(Math.abs(result.err)).toFixed(0)}°).`);
+    }
+    commitLanding(result.nodes, result.c, base, body);
+  } catch (e) {
+    if (!(e instanceof PlanError)) console.error(e);
+    routeMessage = { text: e instanceof PlanError ? e.message : "Erreur de calcul de l'atterrissage visé.", error: true };
   }
 }
 
@@ -1768,6 +1898,7 @@ function setupUI() {
     clear: byId("btn-clear"),
     circularize: byId("btn-circularize"),
     land: byId("btn-land"),
+    landAngle: byId("in-land-angle"),
     camera: byId("btn-camera"),
     warp: byId("btn-warp"),
     warpUp: byId("btn-warp-up"),
@@ -1813,7 +1944,7 @@ function setupUI() {
   onClick(ui.launch, launchPlan);
   onClick(ui.clear, clearPlan);
   onClick(ui.circularize, circularizeOrbit);
-  onClick(ui.land, planLanding);
+  onClick(ui.land, () => (ui.landAngle.value === "" ? planLanding() : planLandingAt(+ui.landAngle.value)));
   onClick(ui.remove, deleteSelectedNode);
   onClick(ui.camera, toggleCamera);
   onClick(ui.warpUp, () => changeWarp(1));
@@ -1877,6 +2008,7 @@ function updateUI(prediction) {
   ui.circularize.disabled = ship.crashed;
   ui.land.hidden = !planning;
   ui.land.disabled = ship.crashed;
+  ui.landAngle.hidden = !planning;
   ui.targetPanel.hidden = !planning;
   ui.routeInfo.textContent = routeMessage.text;
   ui.routeInfo.classList.toggle("error", routeMessage.error);
@@ -2160,25 +2292,28 @@ function drawStars() {
   }
 }
 
-// traînée relative à l'astre de référence actuel
-function drawTrail() {
-  const refPos = bodyPositionAt(ship.ref, gameTime);
-  noFill();
-  strokeWeight(1.5 / zoom);
-  beginShape();
-  for (let i = 0; i < trail.length; i++) {
-    const p = trail[i];
-    if (p.ref !== ship.ref) continue;
-    stroke(255, 255, 255, map(i, 0, trail.length, 0, 120));
-    vertex(refPos.x + p.rx, refPos.y + p.ry);
-  }
-  endShape();
-}
-
 function drawBody(body) {
+  if (body.atmosphere) drawAtmosphere(body);
   noStroke();
   fill(...body.color);
   circle(body.x, body.y, Math.max(body.radius * 2, 6 / zoom));
+}
+
+// halo translucide (anneaux concentriques, de plus en plus transparents vers
+// l'extérieur) représentant l'atmosphère : purement visuel, la physique
+// réelle (densité exponentielle) est calculée séparément dans stepShip
+function drawAtmosphere(body) {
+  const atmo = body.atmosphere;
+  const col = atmo.color || body.color;
+  const rings = 10;
+  noStroke();
+  for (let i = rings; i >= 1; i--) {
+    const frac = i / rings; // 1 = bord extérieur, →0 = près du sol
+    const r = body.radius + atmo.height * frac;
+    const alpha = (1 - frac) * (1 - frac) * 70 * Math.min(1.4, atmo.density);
+    fill(col[0], col[1], col[2], alpha);
+    circle(body.x, body.y, r * 2);
+  }
 }
 
 // nom des astres trop petits à l'écran pour être reconnus
@@ -2245,7 +2380,9 @@ function drawHUD(referenceBody, prediction) {
     mode === "planning"
       ? "⏸ PAUSE — planification"
       : ship.crashed
-      ? "CRASH — [R] pour relancer"
+      ? ship.crashReason === "chaleur"
+        ? "CRASH — le vaisseau s'est consumé dans l'atmosphère — [R] pour relancer"
+        : "CRASH — [R] pour relancer"
       : autopilot
       ? autopilotStatus()
       : ship.landed
@@ -2266,6 +2403,10 @@ function drawHUD(referenceBody, prediction) {
   let y = 16 + lines.length * 20 + 4;
   drawFuelGauge(16, y, prediction);
   y += 34;
+  if (referenceBody.atmosphere || ship.heat > 1) {
+    drawHeatGauge(16, y);
+    y += 34;
+  }
   if (!ship.landed && !ship.crashed) {
     drawRotationIndicator(16, y);
     y += 40;
@@ -2281,7 +2422,7 @@ function drawHUD(referenceBody, prediction) {
       ? [
           "Clic sur le tracé : ajouter une manœuvre · clic sur un point : la sélectionner · glisser un point : le déplacer",
           "Glisser le fond : déplacer la vue · molette : zoom · [Suppr] effacer la manœuvre · [Échap] désélectionner",
-          "« Destination » : choisir un astre et une altitude, la route est calculée automatiquement · « Atterrir » : se poser à la fin du plan",
+          "« Destination » : choisir un astre et une altitude, la route est calculée automatiquement · « Atterrir » : se poser à la fin du plan (angle précisé = viser ce point de la surface)",
           "[P] ou « Lancer le plan » : reprendre le jeu, le pilote automatique exécute le plan",
           "Tracé : vert = sans poussée · jaune = rotation · orange = poussée — chaque portion est dessinée autour de son astre",
         ]
@@ -2319,6 +2460,23 @@ function drawFuelGauge(x, y, prediction) {
   textSize(12);
   textAlign(LEFT, TOP);
   text(label, x, y);
+}
+
+// jauge d'échauffement atmosphérique : vide tant qu'on est dans le vide,
+// monte dans l'atmosphère avec la vitesse, pleine = destruction
+function drawHeatGauge(x, y) {
+  const w = 180;
+  const h = 8;
+  const ratio = constrain(ship.heat / HEAT_MAX, 0, 1);
+  noStroke();
+  fill(255, 255, 255, 30);
+  rect(x, y + 16, w, h, 3);
+  fill(ratio < 0.5 ? [255, 200, 110] : [255, 90, 70]);
+  rect(x, y + 16, w * ratio, h, 3);
+  fill(255, 220);
+  textSize(12);
+  textAlign(LEFT, TOP);
+  text(`Échauffement : ${Math.round(ratio * 100)} %${ratio > 0.7 ? " ⚠" : ""}`, x, y);
 }
 
 function drawPlanSummary(x, y, prediction) {
