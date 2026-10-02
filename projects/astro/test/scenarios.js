@@ -4,7 +4,7 @@
 import { COAST, SIM_DT, bodyById, cloneShip, planet, stepShip } from "../src/sim/index.js";
 import { createAutopilot } from "../src/autopilot/index.js";
 import { PLAN_MAX_HORIZON, landingSequence, legLaunch, makeCtx, parkingRadius, planDone, planRoute, predictPath, runCtx } from "../src/plan/index.js";
-import { createWorld } from "../sketch.js";
+import { createWorld } from "../src/game/index.js";
 
 function sampleShip(s, t) {
   return [t, s.ref.id, s.rx, s.ry, s.rvx, s.rvy, s.angle, s.angularVelocity, s.fuel, s.heat, s.landed, s.crashed];
