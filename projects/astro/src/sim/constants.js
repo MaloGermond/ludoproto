@@ -56,6 +56,12 @@ export let HEAT_COOLING = 3; // perte de chaleur/s par rayonnement, même hors a
 
 export let HEAT_MAX = 100;
 
+// géantes gazeuses : pas de surface solide (cf. BODY_CONFIGS, champ
+// `gasGiant`) — on s'y enfonce au lieu de s'y poser, et la pression/
+// température ambiantes y sont mortelles en profondeur indépendamment de la
+// vitesse (contrairement à l'échauffement aérodynamique ci-dessus).
+export let GAS_GIANT_DEPTH_HEAT = 15; // gain de chaleur/s = GAS_GIANT_DEPTH_HEAT × densité, sous la surface nominale
+
 // rotation façon RCS spatial : maintenir ←/→ accélère en continu la vitesse
 // angulaire, un tapotement bref ne fait qu'un petit ajustement. Sans
 // frottement, la vitesse angulaire persiste jusqu'à ce qu'on la contre.
@@ -92,6 +98,7 @@ const SETTERS = {
   HEAT_RATE: (v) => (HEAT_RATE = v),
   HEAT_COOLING: (v) => (HEAT_COOLING = v),
   HEAT_MAX: (v) => (HEAT_MAX = v),
+  GAS_GIANT_DEPTH_HEAT: (v) => (GAS_GIANT_DEPTH_HEAT = v),
   ROTATION_ACCEL: (v) => (ROTATION_ACCEL = v),
   SNAP_ANGULAR_VELOCITY: (v) => (SNAP_ANGULAR_VELOCITY = v),
   SNAP_ANGLE_TOLERANCE: (v) => (SNAP_ANGLE_TOLERANCE = v),
@@ -108,6 +115,7 @@ export const TUNABLE = [
   { key: "HEAT_RATE", label: "Échauffement", min: 0, max: 0.004, step: 0.00005 },
   { key: "HEAT_COOLING", label: "Refroidissement", min: 0, max: 20, step: 0.5 },
   { key: "HEAT_MAX", label: "Jauge de chaleur max", min: 10, max: 500, step: 10 },
+  { key: "GAS_GIANT_DEPTH_HEAT", label: "Chauffe en profondeur (géantes gazeuses)", min: 0, max: 50, step: 1 },
   { key: "LANDING_MAX_SPEED", label: "Vitesse d'atterrissage max", min: 10, max: 400, step: 5 },
   { key: "LANDING_MAX_ANGLE", label: "Inclinaison d'atterrissage max", min: 5, max: 90, step: 1, unit: "deg" },
   { key: "ROTATION_ACCEL", label: "Accél. de rotation (manuel)", min: 0.1, max: 10, step: 0.1 },
@@ -128,6 +136,7 @@ const GETTERS = {
   HEAT_RATE: () => HEAT_RATE,
   HEAT_COOLING: () => HEAT_COOLING,
   HEAT_MAX: () => HEAT_MAX,
+  GAS_GIANT_DEPTH_HEAT: () => GAS_GIANT_DEPTH_HEAT,
   ROTATION_ACCEL: () => ROTATION_ACCEL,
   SNAP_ANGULAR_VELOCITY: () => SNAP_ANGULAR_VELOCITY,
   SNAP_ANGLE_TOLERANCE: () => SNAP_ANGLE_TOLERANCE,

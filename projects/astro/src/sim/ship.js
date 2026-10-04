@@ -7,6 +7,7 @@ import {
   AUTOPILOT_SLEW_RATE,
   DRAG_COEFF,
   FUEL_MAX,
+  GAS_GIANT_DEPTH_HEAT,
   HEAT_COOLING,
   HEAT_MAX,
   HEAT_RATE,
@@ -253,14 +254,24 @@ function applyThrust(s, dt, control, acc) {
 function applyAtmosphere(s, dt, acc) {
   const R = s.ref;
   const altitude = acc.r - R.radius;
-  const density = R.atmosphere && altitude < R.atmosphere.height ? R.atmosphere.density * Math.exp(-Math.max(0, altitude) / R.atmosphere.scaleHeight) : 0;
+  // pas de plancher à 0 : une géante gazeuse n'a pas de surface solide
+  // (resolveCollision ne l'arrête pas, cf. plus bas), donc une altitude
+  // négative continue d'épaissir l'atmosphère au lieu de stagner à la
+  // densité de surface — s'y enfoncer est fatal, comme dans la réalité.
+  const density = R.atmosphere && altitude < R.atmosphere.height ? R.atmosphere.density * Math.exp(-altitude / R.atmosphere.scaleHeight) : 0;
   if (density > 0) {
     const speed = Math.hypot(s.rvx, s.rvy) || 1e-6;
     const ratio = massRatio(s);
     const drag = (DRAG_COEFF * density * speed * speed) / ratio;
     acc.ax -= (drag * s.rvx) / speed;
     acc.ay -= (drag * s.rvy) / speed;
-    s.heat += ((HEAT_RATE * density * speed * speed * speed) / ratio - HEAT_COOLING) * dt;
+    // pression/température ambiantes d'une géante gazeuse : mortelles en
+    // profondeur même à vitesse quasi nulle (le freinage ci-dessus suffit à
+    // faire chuter la vitesse avant que l'échauffement aérodynamique seul
+    // n'ait eu le temps de tuer) — sans surface solide, il n'y a jamais de
+    // "fond" où se stabiliser.
+    const depthHeat = R.gasGiant && altitude < 0 ? GAS_GIANT_DEPTH_HEAT * density : 0;
+    s.heat += ((HEAT_RATE * density * speed * speed * speed) / ratio + depthHeat / ratio - HEAT_COOLING) * dt;
   } else {
     s.heat -= HEAT_COOLING * dt;
   }
@@ -284,6 +295,7 @@ function integrate(s, dt, acc) {
 // Renvoie true s'il y a eu contact.
 function resolveCollision(s) {
   const R = s.ref;
+  if (R.gasGiant) return false; // pas de surface solide : on s'enfonce, l'atmosphère (cf. applyAtmosphere) se charge du reste
   const d = Math.hypot(s.rx, s.ry);
   if (d >= R.radius + SHIP_SIZE / 2) return false;
   const outwardAngle = Math.atan2(s.ry, s.rx);
