@@ -5,7 +5,7 @@
 // - view : la façon de le regarder et de l'éditer (caméra, sélection…).
 // ---------------------------------------------------------------------------
 
-import { createShip } from "../sim/index.js";
+import { createShip, REFERENCE_MASS } from "../sim/index.js";
 
 export const MAX_FRAME_DT = 0.25; // évite une avalanche de pas après un onglet en arrière-plan
 export const WARP_LEVELS = [1, 2, 5, 10, 25, 50, 100]; // accélération du temps
@@ -51,7 +51,7 @@ export function createView(world) {
 }
 
 export function resetShip(world) {
-  const mass = world.ship ? world.ship.mass : 1; // le poids choisi est une config du vaisseau, pas un consommable de vol : il survit au crash
+  const mass = world.ship ? world.ship.mass : REFERENCE_MASS; // le poids choisi est une config du vaisseau, pas un consommable de vol : il survit au crash
   world.ship = createShip(world.time);
   world.ship.mass = mass;
   world.autopilot = null;

@@ -13,6 +13,7 @@ import {
   LANDED_ROTATION_SPEED,
   LANDING_MAX_ANGLE,
   LANDING_MAX_SPEED,
+  REFERENCE_MASS,
   ROTATION_ACCEL,
   SHIP_SIZE,
   SNAP_ANGLE_TOLERANCE,
@@ -40,19 +41,25 @@ export function createShip(t) {
     thrusting: false,
     fuel: FUEL_MAX,
     heat: 0,
-    mass: 1,
+    mass: REFERENCE_MASS, // kg — poids réglable dans l'interface
   };
   syncShipAbsolute(ship, t);
   return ship;
 }
 
-// accélération réellement délivrée par le moteur : THRUST_ACCEL est calibré
-// pour une masse de référence 1 (comportement inchangé par défaut) ; un
-// vaisseau plus lourd accélère moins pour la même poussée (F = m·a), freine
-// aussi moins dans l'atmosphère (plus lourd = plus "balistique") et chauffe
-// moins vite (plus d'inertie thermique) pour le même flux.
+// ratio entre la masse réelle du vaisseau et celle pour laquelle
+// THRUST_ACCEL (et les coefficients de traînée/échauffement) sont calibrés ;
+// 1 à la masse de référence, comportement inchangé.
+export function massRatio(s) {
+  return s.mass / REFERENCE_MASS;
+}
+
+// accélération réellement délivrée par le moteur : un vaisseau plus lourd
+// accélère moins pour la même poussée (F = m·a), freine aussi moins dans
+// l'atmosphère (plus lourd = plus "balistique") et chauffe moins vite (plus
+// d'inertie thermique) pour le même flux.
 export function thrustAccel(s) {
-  return THRUST_ACCEL / s.mass;
+  return THRUST_ACCEL / massRatio(s);
 }
 
 export function cloneShip(s) {
@@ -215,10 +222,11 @@ function applyAtmosphere(s, dt, acc) {
   const density = R.atmosphere && altitude < R.atmosphere.height ? R.atmosphere.density * Math.exp(-Math.max(0, altitude) / R.atmosphere.scaleHeight) : 0;
   if (density > 0) {
     const speed = Math.hypot(s.rvx, s.rvy) || 1e-6;
-    const drag = (DRAG_COEFF * density * speed * speed) / s.mass;
+    const ratio = massRatio(s);
+    const drag = (DRAG_COEFF * density * speed * speed) / ratio;
     acc.ax -= (drag * s.rvx) / speed;
     acc.ay -= (drag * s.rvy) / speed;
-    s.heat += (HEAT_RATE * density * speed * speed * speed / s.mass - HEAT_COOLING) * dt;
+    s.heat += ((HEAT_RATE * density * speed * speed * speed) / ratio - HEAT_COOLING) * dt;
   } else {
     s.heat -= HEAT_COOLING * dt;
   }

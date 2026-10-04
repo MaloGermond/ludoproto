@@ -13,7 +13,15 @@ export const SIM_DT = 1 / 60;
 
 export const SHIP_SIZE = 14;
 
-export let THRUST_ACCEL = 45; // accélération à pleine puissance (masse de référence 1, cf. sim/ship.js thrustAccel)
+// masse de référence pour laquelle THRUST_ACCEL (et les coefficients de
+// traînée/échauffement) sont calibrés : un petit module habité/atterrisseur
+// (entre la capsule Mercury à 1,4 t et le module lunaire Apollo à vide à
+// 2,1 t). Le champ "masse du vaisseau" de l'interface édite un poids en kg
+// directement ; thrustAccel() ci-dessous ramène cette masse réelle à son
+// ratio par rapport à cette référence avant de diviser l'accélération.
+export const REFERENCE_MASS = 1500; // kg
+
+export let THRUST_ACCEL = 45; // accélération à pleine puissance, pour un vaisseau à REFERENCE_MASS (cf. sim/ship.js thrustAccel)
 
 export let LANDED_ROTATION_SPEED = 3.6; // rad/s — rotation au sol, sans inertie
 

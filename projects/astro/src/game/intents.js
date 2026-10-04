@@ -149,7 +149,7 @@ const HANDLERS = {
     world.flightPredictionDirty = true;
   },
   setShipMass: (world, view, { value }) => {
-    world.ship.mass = Math.max(0.1, value);
+    world.ship.mass = Math.max(10, value); // kg — évite une masse nulle ou négative
     world.plan.dirty = true;
     world.flightPredictionDirty = true;
   },
