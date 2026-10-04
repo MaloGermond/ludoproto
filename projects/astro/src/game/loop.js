@@ -10,6 +10,7 @@ import {
   THRUST_PREDICTION_HORIZON,
 } from "../plan/index.js";
 import {
+  ALL_BODIES,
   bodies,
   bodyPositionAt,
   constrain,
@@ -23,6 +24,55 @@ import { MAX_FRAME_DT, WARP_LEVELS } from "./state.js";
 // mêmes formules que lerp() et map() de p5
 const lerp = (start, stop, amt) => amt * (stop - start) + start;
 const mapRange = (n, start1, stop1, start2, stop2) => ((n - start1) / (stop1 - start1)) * (stop2 - start2) + start2;
+
+// caméra libre : sous ce zoom (vue large), on se cale sur le Soleil plutôt
+// que sur l'astre le plus proche du point regardé
+const FREE_CAMERA_ZOOM_THRESHOLD = 0.02;
+
+// fond étoilé : deux couches à des profondeurs différentes (cf.
+// render/bodies.js), qui dérivent chacune à sa propre fraction du
+// déplacement de la caméra — vraie parallaxe (plus loin = bouge moins)
+// plutôt qu'un seul plan.
+export const STAR_LAYER_DEPTHS = [0.15, 0.04];
+
+function nearestBody(x, y) {
+  let best = sun;
+  let bestD = Infinity;
+  for (const b of ALL_BODIES) {
+    const d = (b.x - x) * (b.x - x) + (b.y - y) * (b.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+// position écran du Soleil (origine fixe du système) : référence stable
+// pour mesurer le déplacement de la caméra d'un frame à l'autre, quel que
+// soit le mode (parallaxe des étoiles, cf. updateStarParallax)
+function sunScreenPos(view) {
+  return { x: width / 2 - view.cameraX * view.zoom, y: height / 2 - view.cameraY * view.zoom };
+}
+
+// accumule, pour chaque couche d'étoiles, une fraction du déplacement de la
+// caméra depuis le frame précédent (delta, pas position absolue) : borné et
+// centré sur la caméra par construction, plutôt que dépendant de la
+// position absolue dans le système (déjà des milliers d'unités près de la
+// Terre) ou recalculé à partir du zoom seul (ce qui prenait pour un
+// panoramique le recentrage de la molette sous le curseur).
+function updateStarParallax(view) {
+  const screen = sunScreenPos(view);
+  if (view.sunScreen) {
+    const dx = screen.x - view.sunScreen.x;
+    const dy = screen.y - view.sunScreen.y;
+    view.starOffsets.forEach((o, i) => {
+      o.x += dx * STAR_LAYER_DEPTHS[i];
+      o.y += dy * STAR_LAYER_DEPTHS[i];
+    });
+  }
+  view.sunScreen = screen;
+}
 
 export function currentPlanPrediction(world) {
   const plan = world.plan;
@@ -99,18 +149,20 @@ export function advanceSimulation(world, elapsed, manual) {
 
 // caméra suiveuse : accompagne l'astre de référence du vaisseau (sinon,
 // avec la Terre qui file autour du Soleil, tout sortirait de l'écran).
-// Caméra libre : accompagne le Soleil à la place — fixe (origine du
-// système), donc la vue reste exactement où on l'a placée au lieu de
-// dériver avec le mouvement orbital de l'astre où se trouve le vaisseau.
+// Caméra libre : accompagne l'astre le plus proche du point regardé tant
+// qu'on est assez zoomé (pour qu'il ne dérive pas sous son propre mouvement
+// orbital), et le Soleil au-delà d'un certain dézoom (vue d'ensemble, où
+// l'essentiel n'est plus la dérive d'un astre en particulier).
 export function updateCamera(view, world) {
   const ship = world.ship;
-  const frameBody = view.cameraFree ? sun : ship.ref;
+  const frameBody = view.cameraFree ? (view.zoom < FREE_CAMERA_ZOOM_THRESHOLD ? sun : nearestBody(view.cameraX, view.cameraY)) : ship.ref;
   const refPos = bodyPositionAt(frameBody, world.time);
   if (view.cameraFrame && view.cameraFrame.body === frameBody) {
     view.cameraX += refPos.x - view.cameraFrame.x;
     view.cameraY += refPos.y - view.cameraFrame.y;
   }
   view.cameraFrame = { body: frameBody, x: refPos.x, y: refPos.y };
+  updateStarParallax(view);
   if (view.cameraFree) return;
 
   // caméra suiveuse : centrée sur le vaisseau, dézoome quand la vitesse augmente

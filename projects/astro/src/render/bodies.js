@@ -48,22 +48,29 @@ export function drawOrbits(world, view) {
   pop();
 }
 
-// fond étoilé très lointain : ne doit réagir qu'au panoramique (parallaxe,
-// à peine), pas au zoom. Le décalage caméra doit donc être mis à l'échelle
-// par view.zoom comme le reste de la scène (voir renderScene) — sans ce
-// facteur, le recentrage de la molette (qui déplace cameraX/Y pour garder
-// le point sous le curseur) était pris pour un panoramique et amplifié
-// d'autant plus que le zoom était faible, d'où une dérive nette en dézoom.
-const STAR_PARALLAX = 0.08;
+// fond étoilé : deux couches à des profondeurs différentes (STAR_LAYER_DEPTHS,
+// cf. game/loop.js), chacune de base uniformément répartie sur l'écran et
+// décalée par view.starOffsets[i] — une dérive accumulée à chaque frame à
+// partir du déplacement réel de la caméra (bornée, centrée sur la caméra),
+// plutôt que recalculée depuis la position/le zoom absolus (ce qui donnait
+// un décalage géant et dépendant du point du système où l'on se trouve).
+const STAR_LAYERS = [
+  { count: 120, size: 2.2, alpha: 170 }, // couche proche : plus grosse, bouge plus
+  { count: 160, size: 1.2, alpha: 110 }, // couche lointaine : plus petite, bouge moins
+];
+
 export function drawStars(view) {
-  randomSeed(1);
   noStroke();
-  fill(255, 255, 255, 150);
-  for (let i = 0; i < 200; i++) {
-    const x = (random(-2000, 2000) - view.cameraX * view.zoom * STAR_PARALLAX) % width;
-    const y = (random(-2000, 2000) - view.cameraY * view.zoom * STAR_PARALLAX) % height;
-    circle((x + width) % width, (y + height) % height, 2);
-  }
+  STAR_LAYERS.forEach((layer, i) => {
+    randomSeed(1000 + i); // graine distincte par couche, sinon les deux se superposent exactement
+    fill(255, 255, 255, layer.alpha);
+    const offset = view.starOffsets[i] || { x: 0, y: 0 };
+    for (let s = 0; s < layer.count; s++) {
+      const x = (((random(0, width) + offset.x) % width) + width) % width;
+      const y = (((random(0, height) + offset.y) % height) + height) % height;
+      circle(x, y, layer.size);
+    }
+  });
 }
 
 export function drawBody(view, body) {

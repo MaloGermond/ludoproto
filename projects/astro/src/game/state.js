@@ -48,6 +48,8 @@ export function createView(world) {
     routeMessage: { text: "", error: false },
     showSettings: false, // panneau de configuration (⚙)
     precisionMode: false, // approche précise (RCS) : ↑↓←→ translatent sans rotation
+    starOffsets: [{ x: 0, y: 0 }, { x: 0, y: 0 }], // dérive accumulée de chaque couche d'étoiles (parallaxe, cf. render/bodies.js)
+    sunScreen: null, // position écran du Soleil au frame précédent (calcule le déplacement de la caméra d'un frame à l'autre)
   };
 }
 
@@ -65,4 +67,5 @@ export function recenterCamera(view, ship) {
   view.cameraX = ship.x;
   view.cameraY = ship.y;
   view.cameraFrame = null;
+  view.sunScreen = null; // évite un saut des étoiles au prochain frame (cf. updateStarParallax)
 }
