@@ -43,6 +43,7 @@ export function setupUI(app, emit) {
     outDuration: byId("out-duration"),
     info: byId("node-info"),
     presets: document.querySelector("#node-panel .presets"),
+    shipMass: byId("in-ship-mass"),
     settings: byId("btn-settings"),
     settingsPanel: byId("settings-panel"),
     settingsReset: byId("btn-settings-reset"),
@@ -81,6 +82,11 @@ export function setupUI(app, emit) {
   onClick(ui.warpDown, () => ({ type: "changeWarp", delta: -1 }));
   onClick(ui.warp, () => ({ type: "resetWarp" }));
   onClick(ui.settings, () => ({ type: "toggleSettings" }));
+  ui.shipMass.value = app.world.ship.mass;
+  DEFAULTS.mass = app.world.ship.mass;
+  ui.shipMass.addEventListener("input", () => {
+    if (ui.shipMass.value !== "") emit({ type: "setShipMass", value: Number(ui.shipMass.value) });
+  });
   ui.settingsReset.addEventListener("click", () => {
     resetSettingsRows(app, emit);
     ui.settingsReset.blur();
@@ -115,9 +121,10 @@ export function resizeToWindow() {
 
 // ---------------------------------------------------------------------------
 // Panneau de réglages (⚙) : une ligne par constante réglable (TUNABLE, cf.
-// sim/constants.js) + la masse du vaisseau, construites dynamiquement pour
-// ne pas avoir à dupliquer la liste dans l'HTML. DEFAULTS capture la valeur
-// de départ de chaque ligne, pour « Réinitialiser ».
+// sim/constants.js), construites dynamiquement pour ne pas avoir à dupliquer
+// la liste dans l'HTML. Le poids du vaisseau a son propre champ, toujours
+// visible dans la barre d'outils (cf. in-ship-mass). DEFAULTS capture la
+// valeur de départ de chaque ligne, pour « Réinitialiser ».
 // ---------------------------------------------------------------------------
 const DEFAULTS = {};
 
@@ -143,13 +150,6 @@ function buildSettingsRows(app, emit) {
   ui.settingsRows.innerHTML = "";
   ui.settingsInputs = {};
 
-  const mass = settingsRow("Masse du vaisseau", app.world.ship.mass, { min: 0.1, max: 20, step: 0.1 }, (v) =>
-    emit({ type: "setShipMass", value: v })
-  );
-  ui.settingsRows.appendChild(mass.row);
-  ui.settingsInputs.mass = mass.input;
-  DEFAULTS.mass = app.world.ship.mass;
-
   for (const t of TUNABLE) {
     const value = t.unit === "deg" ? degrees(getConstant(t.key)) : getConstant(t.key);
     DEFAULTS[t.key] = value;
@@ -163,7 +163,7 @@ function buildSettingsRows(app, emit) {
 
 function resetSettingsRows(app, emit) {
   emit({ type: "setShipMass", value: DEFAULTS.mass });
-  ui.settingsInputs.mass.value = DEFAULTS.mass;
+  ui.shipMass.value = DEFAULTS.mass;
   for (const t of TUNABLE) {
     const value = DEFAULTS[t.key];
     emit({ type: "setConstant", key: t.key, value: t.unit === "deg" ? radians(value) : value });

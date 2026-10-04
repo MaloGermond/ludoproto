@@ -4,8 +4,13 @@
 import { ui } from "./dom.js";
 import { syncPanel } from "./panels.js";
 
-// commande manuelle lue sur le clavier à chaque image
+// commande manuelle lue sur le clavier à chaque image. keyIsDown() est
+// global à la page (indépendant du focus) : sans ce garde-fou, utiliser les
+// flèches haut/bas d'un champ numérique (ex. poids du vaisseau, réglages)
+// pour en changer la valeur déclenchait aussi la poussée/rotation du jeu.
 export function readManualControl() {
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "SELECT") return { left: false, right: false, thrust: 0, slewTo: null, assist: true };
   return {
     left: keyIsDown(LEFT_ARROW),
     right: keyIsDown(RIGHT_ARROW),

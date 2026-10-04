@@ -51,7 +51,9 @@ export function createView(world) {
 }
 
 export function resetShip(world) {
+  const mass = world.ship ? world.ship.mass : 1; // le poids choisi est une config du vaisseau, pas un consommable de vol : il survit au crash
   world.ship = createShip(world.time);
+  world.ship.mass = mass;
   world.autopilot = null;
   world.autopilotPrediction = null;
   world.flightPredictionDirty = true;
