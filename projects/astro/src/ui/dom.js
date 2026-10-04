@@ -22,6 +22,7 @@ export function setupUI(app, emit) {
     land: byId("btn-land"),
     landAngle: byId("in-land-angle"),
     camera: byId("btn-camera"),
+    precision: byId("btn-precision"),
     warp: byId("btn-warp"),
     warpUp: byId("btn-warp-up"),
     warpDown: byId("btn-warp-down"),
@@ -78,6 +79,7 @@ export function setupUI(app, emit) {
   onClick(ui.land, () => ({ type: "land", angle: ui.landAngle.value === "" ? null : +ui.landAngle.value }));
   onClick(ui.remove, () => ({ type: "deleteNode" }));
   onClick(ui.camera, () => ({ type: "toggleCamera" }));
+  onClick(ui.precision, () => ({ type: "togglePrecision" }));
   onClick(ui.warpUp, () => ({ type: "changeWarp", delta: 1 }));
   onClick(ui.warpDown, () => ({ type: "changeWarp", delta: -1 }));
   onClick(ui.warp, () => ({ type: "resetWarp" }));

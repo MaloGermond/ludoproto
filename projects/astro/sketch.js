@@ -41,7 +41,7 @@ function windowResized() {
 
 function draw() {
   const { world, view } = app;
-  const prediction = frame(world, view, deltaTime * 0.001, readManualControl());
+  const prediction = frame(world, view, deltaTime * 0.001, readManualControl(view));
   renderScene(world, view, prediction);
   updateUI(world, view, prediction);
 }

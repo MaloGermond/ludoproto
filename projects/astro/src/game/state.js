@@ -47,6 +47,7 @@ export function createView(world) {
     pointer: null, // geste souris en cours
     routeMessage: { text: "", error: false },
     showSettings: false, // panneau de configuration (⚙)
+    precisionMode: false, // approche précise (RCS) : ↑↓←→ translatent sans rotation
   };
 }
 

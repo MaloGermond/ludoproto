@@ -140,6 +140,9 @@ const HANDLERS = {
   toggleSettings: (world, view) => {
     view.showSettings = !view.showSettings;
   },
+  togglePrecision: (world, view) => {
+    view.precisionMode = !view.precisionMode;
+  },
   // panneau de configuration (⚙) : constantes physiques (liaisons vivantes,
   // cf. sim/constants.js) et masse du vaisseau — invalide les prédictions
   // mises en cache, qui sinon continueraient de refléter les anciennes valeurs

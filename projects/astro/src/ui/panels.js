@@ -36,6 +36,8 @@ export function updateUI(world, view, prediction) {
   ui.camera.hidden = planning;
   ui.camera.classList.toggle("active", view.cameraFree);
   ui.camera.textContent = view.cameraFree ? "🎯 Suivre le vaisseau" : "🎥 Caméra libre";
+  ui.precision.hidden = planning;
+  ui.precision.classList.toggle("active", view.precisionMode);
   ui.warp.textContent = `×${WARP_LEVELS[world.warpIndex]}`;
   for (const b of [ui.warp, ui.warpUp, ui.warpDown]) b.hidden = planning;
   ui.settings.classList.toggle("active", view.showSettings);

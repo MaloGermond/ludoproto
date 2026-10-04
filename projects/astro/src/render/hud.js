@@ -79,8 +79,10 @@ export function drawHUD(world, view, prediction) {
           "Tracé : vert = sans poussée · jaune = rotation · orange = poussée — chaque portion est dessinée autour de son astre",
         ]
       : [
-          "↑ poussée · ←/→ maintenir pour tourner, tapoter pour ajuster finement (inertie, sans frottement)",
-          "[C] caméra libre (glisser / molette) · [,] [.] accélérer le temps",
+          view.precisionMode
+            ? "🎯 Approche précise : ↑↓ avant/arrière · ←/→ latéral — translation sans rotation, à faible poussée (RCS)"
+            : "↑ poussée · ←/→ maintenir pour tourner, tapoter pour ajuster finement (inertie, sans frottement)",
+          `[C] caméra libre (glisser / molette) · [,] [.] accélérer le temps · [X] ${view.precisionMode ? "quitter l'" : ""}approche précise`,
           world.autopilot ? "Pilote automatique actif — une touche fléchée reprend la main" : "Pointillés verts : trajectoire prédite (sans poussée)",
           "[P] ou « Planifier » : pause et planification de la trajectoire",
         ];

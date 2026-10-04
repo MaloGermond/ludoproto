@@ -23,6 +23,12 @@ export const REFERENCE_MASS = 1500; // kg
 
 export let THRUST_ACCEL = 45; // accélération à pleine puissance, pour un vaisseau à REFERENCE_MASS (cf. sim/ship.js thrustAccel)
 
+// mode d'approche précise (RCS) : avant/arrière/latéral dans l'axe du
+// vaisseau, sans rotation, à une fraction de la poussée principale — pour
+// les manœuvres fines (accostage, visée d'un point précis) sans avoir à
+// pivoter pour chaque petite correction.
+export let RCS_THRUST_FRACTION = 0.12;
+
 export let LANDED_ROTATION_SPEED = 3.6; // rad/s — rotation au sol, sans inertie
 
 // carburant exprimé en Δv : chaque seconde de poussée à pleine puissance
@@ -70,7 +76,7 @@ export let SNAP_PULL = 0.08; // fraction de l'écart corrigée par frame (effet 
 // manœuvre. Ce temps de rotation retarde d'autant le début de la poussée.
 export let AUTOPILOT_SLEW_RATE = 1.2; // rad/s
 
-export const COAST = { left: false, right: false, thrust: 0, slewTo: null, assist: false };
+export const COAST = { left: false, right: false, thrust: 0, slewTo: null, assist: false, translateForward: 0, translateRight: 0 };
 
 // ---------------------------------------------------------------------------
 // Réglages exposés au panneau de configuration (menu ⚙). `unit: "deg"`
@@ -91,10 +97,12 @@ const SETTERS = {
   SNAP_ANGLE_TOLERANCE: (v) => (SNAP_ANGLE_TOLERANCE = v),
   SNAP_PULL: (v) => (SNAP_PULL = v),
   AUTOPILOT_SLEW_RATE: (v) => (AUTOPILOT_SLEW_RATE = v),
+  RCS_THRUST_FRACTION: (v) => (RCS_THRUST_FRACTION = v),
 };
 
 export const TUNABLE = [
   { key: "THRUST_ACCEL", label: "Poussée (accél. max)", min: 5, max: 200, step: 1 },
+  { key: "RCS_THRUST_FRACTION", label: "Poussée RCS (approche précise)", min: 0.01, max: 0.5, step: 0.01 },
   { key: "FUEL_MAX", label: "Carburant max (Δv)", min: 50, max: 2000, step: 10 },
   { key: "DRAG_COEFF", label: "Traînée atmosphérique", min: 0, max: 0.02, step: 0.0005 },
   { key: "HEAT_RATE", label: "Échauffement", min: 0, max: 0.004, step: 0.00005 },
@@ -125,6 +133,7 @@ const GETTERS = {
   SNAP_ANGLE_TOLERANCE: () => SNAP_ANGLE_TOLERANCE,
   SNAP_PULL: () => SNAP_PULL,
   AUTOPILOT_SLEW_RATE: () => AUTOPILOT_SLEW_RATE,
+  RCS_THRUST_FRACTION: () => RCS_THRUST_FRACTION,
 };
 
 export function getConstant(key) {

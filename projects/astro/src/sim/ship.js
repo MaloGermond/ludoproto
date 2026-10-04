@@ -13,6 +13,7 @@ import {
   LANDED_ROTATION_SPEED,
   LANDING_MAX_ANGLE,
   LANDING_MAX_SPEED,
+  RCS_THRUST_FRACTION,
   REFERENCE_MASS,
   ROTATION_ACCEL,
   SHIP_SIZE,
@@ -104,7 +105,8 @@ export function updateSphereOfInfluence(s, t) {
 }
 
 // avance l'état `s` du vaisseau d'un pas `dt` à partir de l'instant `t`.
-// `control` : { left, right, thrust (0..1), slewTo (cap visé ou null), assist }
+// `control` : { left, right, thrust (0..1), slewTo (cap visé ou null), assist,
+//               translateForward (-1..1), translateRight (-1..1) }
 export function stepShip(s, t, dt, control) {
   if (s.crashed) return;
   if (s.landed && !stepLanded(s, dt, control)) return; // reste posé
@@ -196,17 +198,49 @@ function gravity(s) {
 // reste un budget de Δv (indépendant de la masse, par définition du Δv) :
 // un vaisseau plus lourd met plus de temps à le dépenser à pleine poussée,
 // mais une manœuvre donnée (Δv requis) lui coûte le même carburant.
+//
+// `control.translateForward`/`translateRight` (-1..1) : poussée RCS dans
+// l'axe du vaisseau (avant/arrière, latéral) sans rotation, à une fraction
+// de la poussée principale (RCS_THRUST_FRACTION) — approche précise. Les
+// deux canaux partagent le même budget de carburant, au prorata de leur
+// contribution au Δv total du pas.
 function applyThrust(s, dt, control, acc) {
-  let thrust = control.thrust > 0 ? control.thrust : 0;
-  if (thrust > 0) {
-    const accel = thrustAccel(s);
-    const cost = thrust * accel * dt;
-    if (cost > s.fuel) thrust *= s.fuel / cost;
-    s.fuel = Math.max(0, s.fuel - thrust * accel * dt);
-    acc.ax += Math.cos(s.angle) * accel * thrust;
-    acc.ay += Math.sin(s.angle) * accel * thrust;
+  const accel = thrustAccel(s);
+  const main = control.thrust > 0 ? control.thrust : 0;
+  const fwd = (control.translateForward || 0) * RCS_THRUST_FRACTION;
+  const lat = (control.translateRight || 0) * RCS_THRUST_FRACTION;
+
+  if (!fwd && !lat) {
+    // sans RCS : chemin scalaire inchangé (identique bit à bit à avant son
+    // ajout, cf. tests golden-master)
+    let thrust = main;
+    if (thrust > 0) {
+      const cost = thrust * accel * dt;
+      if (cost > s.fuel) thrust *= s.fuel / cost;
+      s.fuel = Math.max(0, s.fuel - thrust * accel * dt);
+      acc.ax += Math.cos(s.angle) * accel * thrust;
+      acc.ay += Math.sin(s.angle) * accel * thrust;
+    }
+    s.thrusting = thrust > 0;
+    return;
   }
-  s.thrusting = thrust > 0;
+
+  // avec RCS : vecteur combiné poussée principale (dans l'axe) + translation
+  const rightAngle = s.angle - HALF_PI;
+  let tx = Math.cos(s.angle) * main + Math.cos(s.angle) * fwd + Math.cos(rightAngle) * lat;
+  let ty = Math.sin(s.angle) * main + Math.sin(s.angle) * fwd + Math.sin(rightAngle) * lat;
+
+  const mag = Math.hypot(tx, ty);
+  if (mag > 0) {
+    const cost = mag * accel * dt;
+    const scale = cost > s.fuel ? s.fuel / cost : 1;
+    tx *= scale;
+    ty *= scale;
+    s.fuel = Math.max(0, s.fuel - mag * scale * accel * dt);
+    acc.ax += tx * accel;
+    acc.ay += ty * accel;
+  }
+  s.thrusting = main > 0;
 }
 
 // atmosphère : freinage (traînée en v²) et échauffement (flux en v³),

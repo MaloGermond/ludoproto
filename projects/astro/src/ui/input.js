@@ -8,15 +8,33 @@ import { syncPanel } from "./panels.js";
 // global à la page (indépendant du focus) : sans ce garde-fou, utiliser les
 // flèches haut/bas d'un champ numérique (ex. poids du vaisseau, réglages)
 // pour en changer la valeur déclenchait aussi la poussée/rotation du jeu.
-export function readManualControl() {
+//
+// Mode d'approche précise (view.precisionMode) : ↑↓ avant/arrière et ←→
+// latéral dans l'axe du vaisseau, à faible poussée (RCS), sans rotation —
+// pour les corrections fines (accostage, visée d'un point) sans avoir à
+// pivoter à chaque fois.
+export function readManualControl(view) {
   const tag = document.activeElement && document.activeElement.tagName;
-  if (tag === "INPUT" || tag === "SELECT") return { left: false, right: false, thrust: 0, slewTo: null, assist: true };
+  if (tag === "INPUT" || tag === "SELECT") return { left: false, right: false, thrust: 0, slewTo: null, assist: true, translateForward: 0, translateRight: 0 };
+  if (view.precisionMode) {
+    return {
+      left: false,
+      right: false,
+      thrust: 0,
+      slewTo: null,
+      assist: false,
+      translateForward: (keyIsDown(UP_ARROW) ? 1 : 0) - (keyIsDown(DOWN_ARROW) ? 1 : 0),
+      translateRight: (keyIsDown(RIGHT_ARROW) ? 1 : 0) - (keyIsDown(LEFT_ARROW) ? 1 : 0),
+    };
+  }
   return {
     left: keyIsDown(LEFT_ARROW),
     right: keyIsDown(RIGHT_ARROW),
     thrust: keyIsDown(UP_ARROW) ? 1 : 0,
     slewTo: null,
     assist: true,
+    translateForward: 0,
+    translateRight: 0,
   };
 }
 
@@ -66,6 +84,7 @@ export function createInputHandlers(app, emit) {
         if (key === ".") emit({ type: "changeWarp", delta: 1 });
         if (key === ",") emit({ type: "changeWarp", delta: -1 });
         if (key === "f" || key === "F") emit({ type: "refuel" });
+        if (key === "x" || key === "X") emit({ type: "togglePrecision" });
         return;
       }
       if (keyCode === DELETE || keyCode === BACKSPACE) {
