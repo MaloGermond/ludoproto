@@ -15,6 +15,7 @@ import {
   constrain,
   SIM_DT,
   stepShip,
+  sun,
   syncShipAbsolute,
 } from "../sim/index.js";
 import { MAX_FRAME_DT, WARP_LEVELS } from "./state.js";
@@ -96,16 +97,20 @@ export function advanceSimulation(world, elapsed, manual) {
   if (world.ship.crashed) stopAutopilot(world);
 }
 
-// la caméra accompagne l'astre de référence du vaisseau (sinon, avec la
-// Terre qui file autour du Soleil, tout sortirait de l'écran)
+// caméra suiveuse : accompagne l'astre de référence du vaisseau (sinon,
+// avec la Terre qui file autour du Soleil, tout sortirait de l'écran).
+// Caméra libre : accompagne le Soleil à la place — fixe (origine du
+// système), donc la vue reste exactement où on l'a placée au lieu de
+// dériver avec le mouvement orbital de l'astre où se trouve le vaisseau.
 export function updateCamera(view, world) {
   const ship = world.ship;
-  const refPos = bodyPositionAt(ship.ref, world.time);
-  if (view.cameraFrame && view.cameraFrame.body === ship.ref) {
+  const frameBody = view.cameraFree ? sun : ship.ref;
+  const refPos = bodyPositionAt(frameBody, world.time);
+  if (view.cameraFrame && view.cameraFrame.body === frameBody) {
     view.cameraX += refPos.x - view.cameraFrame.x;
     view.cameraY += refPos.y - view.cameraFrame.y;
   }
-  view.cameraFrame = { body: ship.ref, x: refPos.x, y: refPos.y };
+  view.cameraFrame = { body: frameBody, x: refPos.x, y: refPos.y };
   if (view.cameraFree) return;
 
   // caméra suiveuse : centrée sur le vaisseau, dézoome quand la vitesse augmente
