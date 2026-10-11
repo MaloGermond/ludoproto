@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>planète — simulateur d'évolution</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside id="panel">
+    <div class="toolbar">
+      <button id="btn-play" class="primary" type="button">⏸ Pause</button>
+      <button id="btn-reset" type="button">↺ Recommencer</button>
+      <select id="in-speed" title="Années simulées par seconde">
+        <option value="1">1 an/s</option>
+        <option value="5">5 ans/s</option>
+        <option value="20" selected>20 ans/s</option>
+        <option value="60">60 ans/s</option>
+        <option value="200">200 ans/s</option>
+      </select>
+    </div>
+
+    <section>
+      <h2>Archétypes</h2>
+      <div id="presets" class="presets"></div>
+    </section>
+
+    <section>
+      <h2>Planète <small>(variables fixes)</small></h2>
+      <div id="fixed"></div>
+    </section>
+
+    <section>
+      <h2>Joueur</h2>
+      <div id="player"></div>
+    </section>
+
+    <section>
+      <h2>État initial <small>(relance la simulation)</small></h2>
+      <div id="initial"></div>
+    </section>
+
+    <details>
+      <summary>Seuils et coefficients</summary>
+      <div id="coeffs"></div>
+      <button id="btn-coeffs-reset" type="button">Valeurs par défaut</button>
+    </details>
+  </aside>
+
+  <main id="stage">
+    <div id="status"></div>
+    <canvas id="planet"></canvas>
+    <div id="gauges"></div>
+    <canvas id="chart"></canvas>
+  </main>
+
+  <script src="sim.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
