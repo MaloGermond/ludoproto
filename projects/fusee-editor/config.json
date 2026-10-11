@@ -1,0 +1,36 @@
+{
+  "_doc": "Toutes les données d'équilibrage de l'éditeur. Unités : m, kg, N, s, coût en k$. 1 case de grille = 1 m. Modifiable sans toucher au code (recharger la page).",
+  "g0": 9.81,
+  "payloadDensity": 200,
+  "unlockedTech": ["basic", "cryo", "composites", "big_engines"],
+  "technologies": {
+    "basic": "Technologies de base",
+    "cryo": "Cryogénie (hydrogène liquide)",
+    "composites": "Composites (coiffes avancées)",
+    "big_engines": "Moteurs lourds"
+  },
+  "limits": { "gridWidth": 40, "gridHeight": 120, "maxEngines": 40 },
+  "engineCounts": [1, 2, 3, 4, 10, 20, 30],
+  "sections": {
+    "tank_kerolox": { "kind": "tank", "name": "Réservoir kérosène/LOX", "tech": "basic", "propellant": "kerolox", "propDensity": 1020, "dryDensity": 40, "usableFraction": 0.92, "costPerM3": 3 },
+    "tank_hydrolox": { "kind": "tank", "name": "Réservoir hydrogène/LOX", "tech": "cryo", "propellant": "hydrolox", "propDensity": 360, "dryDensity": 60, "usableFraction": 0.92, "costPerM3": 8 },
+    "tank_solid": { "kind": "tank", "name": "Bloc poudre", "tech": "basic", "propellant": "solid", "propDensity": 1700, "dryDensity": 250, "usableFraction": 0.95, "costPerM3": 2 },
+    "structure": { "kind": "structure", "name": "Structure", "tech": "basic", "dryDensity": 60, "usableFraction": 0, "costPerM3": 1.5 },
+    "fairing_basic": { "kind": "payload", "name": "Coiffe simple", "tech": "basic", "dryDensity": 20, "usableFraction": 0.5, "costPerM3": 6, "roundBonus": 0.6 },
+    "fairing_advanced": { "kind": "payload", "name": "Coiffe composite", "tech": "composites", "dryDensity": 15, "usableFraction": 0.7, "costPerM3": 12, "roundBonus": 0.6 }
+  },
+  "engines": {
+    "mini": { "name": "Moteur léger", "tech": "basic", "propellant": "kerolox", "width": 1, "thrust": 150000, "isp": 290, "mass": 100, "cost": 250 },
+    "std": { "name": "Moteur standard", "tech": "basic", "propellant": "kerolox", "width": 2, "thrust": 900000, "isp": 300, "mass": 600, "cost": 1200 },
+    "heavy": { "name": "Moteur lourd", "tech": "big_engines", "propellant": "kerolox", "width": 3, "thrust": 2500000, "isp": 310, "mass": 1800, "cost": 3500 },
+    "hydro": { "name": "Moteur cryotechnique", "tech": "cryo", "propellant": "hydrolox", "width": 2, "thrust": 250000, "isp": 440, "mass": 350, "cost": 2500 },
+    "solid": { "name": "Tuyère à poudre", "tech": "basic", "propellant": "solid", "width": 2, "thrust": 700000, "isp": 245, "mass": 300, "cost": 300 }
+  },
+  "missions": {
+    "ballistic": { "name": "Tir balistique", "dv": 3500 },
+    "leo": { "name": "Orbite basse (pertes comprises)", "dv": 9400 },
+    "gto": { "name": "Transfert géostationnaire", "dv": 12200 },
+    "moon": { "name": "Orbite lunaire", "dv": 12800 },
+    "mars": { "name": "Injection vers Mars", "dv": 13800 }
+  }
+}

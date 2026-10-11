@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fusee-editor — éditeur 2D de fusées</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1020; color: #fff; font: 13px system-ui, sans-serif; }
+    #app { display: grid; grid-template-columns: 1fr 340px; height: 100%; }
+    #stage { position: relative; min-width: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #msg { position: absolute; left: 12px; bottom: 10px; color: #ffb4a6; }
+    aside { overflow-y: auto; padding: 12px; background: #10162b; border-left: 1px solid rgba(255,255,255,.15); display: flex; flex-direction: column; gap: 10px; }
+    .panel { padding: 10px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; }
+    .panel h3 { margin: 0 0 6px; font-size: 13px; }
+    .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+    .row > select, .row > input[type=number] { flex: 1; min-width: 0; }
+    button, select, input[type=number] { font: inherit; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.25); border-radius: 6px; padding: 5px 8px; }
+    select option { background: #10162b; }
+    button { cursor: pointer; }
+    button:hover:not(:disabled) { background: rgba(255,255,255,.2); }
+    button:disabled { opacity: .4; cursor: default; }
+    button.on { background: rgba(110,190,255,.3); border-color: rgba(110,190,255,.7); }
+    label.sl { display: block; margin-top: 6px; }
+    label.sl output { float: right; font-variant-numeric: tabular-nums; }
+    input[type=range] { width: 100%; margin: 2px 0 0; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    td, th { padding: 2px 4px; text-align: right; }
+    td:first-child, th:first-child { text-align: left; }
+    .ok { color: #8cffb0; } .bad { color: #ff9a8a; } .muted { color: rgba(255,255,255,.6); }
+    .warn { color: #ffd479; margin: 4px 0 0; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="stage"><canvas id="cv"></canvas><div id="msg"></div></div>
+    <aside>
+      <div class="panel">
+        <h3>Engin</h3>
+        <div class="row">
+          <button id="btn-sym" type="button" title="Symétrie par rapport à l'axe vertical">⇋ Symétrie</button>
+          <select id="sel-ref" title="Designs de référence"></select>
+          <button id="btn-new" type="button">Nouveau</button>
+        </div>
+        <label class="sl">Charge utile <output id="out-payload"></output>
+          <input id="in-payload" type="range" min="0" max="30000" step="50" />
+        </label>
+        <div class="row">
+          <span>Étages : <b id="stage-count"></b></span>
+          <button id="btn-stage-add" type="button">+ étage</button>
+          <button id="btn-stage-del" type="button">− étage</button>
+        </div>
+      </div>
+
+      <div class="panel" id="sec-panel">
+        <h3>Section sélectionnée</h3>
+        <div class="row">
+          <select id="sel-type"></select>
+          <select id="sel-stage" title="Étage"></select>
+        </div>
+        <label class="sl">Hauteur <output id="out-h"></output><input id="in-h" type="range" min="1" max="60" step="1" /></label>
+        <label class="sl">Largeur de la base <output id="out-wb"></output><input id="in-wb" type="range" min="1" max="30" step="1" /></label>
+        <label class="sl">Largeur du haut <output id="out-wt"></output><input id="in-wt" type="range" min="1" max="30" step="1" /></label>
+        <div class="row"><label><input id="chk-cap" type="checkbox" /> Coiffe arrondie (charge utile)</label></div>
+        <div class="row">
+          <select id="sel-engine"></select>
+          <input id="in-engine" type="number" min="0" step="1" value="0" title="Nombre de moteurs" />
+        </div>
+        <div class="row" id="engine-presets"></div>
+        <div class="muted" id="engine-info"></div>
+        <div class="row"><button id="btn-del" type="button">Supprimer la section</button></div>
+      </div>
+
+      <div class="panel">
+        <h3>Résultats</h3>
+        <div class="row">
+          <select id="sel-mission"></select>
+        </div>
+        <p id="mission-line"></p>
+        <table id="tbl-stages"></table>
+        <table id="tbl-total"></table>
+        <div id="warnings"></div>
+      </div>
+    </aside>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
