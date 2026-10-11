@@ -1,0 +1,13 @@
+{
+  "name": "planete",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "serve . -l 3002",
+    "build": "echo \"static simulator, nothing to build\"",
+    "sim": "node sim.js"
+  },
+  "devDependencies": {
+    "serve": "^14.2.1"
+  }
+}
