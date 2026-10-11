@@ -40,9 +40,11 @@ const sliders = { fixed: {}, initial: {}, coeffs: {} };
 
 function buildPanel() {
   const fixedDefs = {
-    metals:   { label: "Métaux", min: 0, max: 1, step: 0.01 },
-    water:    { label: "Eau / glace initiale", min: 0, max: 1, step: 0.01 },
-    distance: { label: "Distance à l'étoile (UA)", min: 0.4, max: 2, step: 0.01 },
+    metals:    { label: "Métaux", min: 0, max: 1, step: 0.01 },
+    water:     { label: "Eau / glace initiale", min: 0, max: 1, step: 0.01 },
+    distance:  { label: "Distance à l'étoile (UA)", min: 0.4, max: 2, step: 0.01 },
+    rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01 },
+    volcanism: { label: "Activité volcanique", min: 0, max: 1, step: 0.01 },
   };
   for (const k in fixedDefs) {
     sliders.fixed[k] = addSlider($("fixed"), { ...fixedDefs[k], value: state.fixed[k] }, (v) => { state.fixed[k] = v; });
@@ -103,7 +105,7 @@ function loadPreset(key) {
 }
 
 function reset() {
-  state.sim = { ...state.initial };
+  state.sim = { ...state.initial, temp: insolation(state.fixed), haze: 0, erosion: 0 };
   state.year = 0;
   state.history = [];
   record();
@@ -226,6 +228,7 @@ const GAUGES = [
   { key: "atmosphere", label: "Atmosphère", color: "#6ab7ff", max: 2 },
   { key: "co2", label: "CO2", color: "#ff9a5a", max: 1 },
   { key: "vegetation", label: "Végétation", color: "#6bd96b", max: 1 },
+  { key: "haze", label: "Cendres volcaniques", color: "#a99", max: 1 },
 ];
 for (const g of GAUGES) {
   const el = document.createElement("div");
@@ -251,8 +254,9 @@ function updateStatus() {
   if (d.temp > d.overheat) flags.push("🔥 surchauffe : la végétation s'effondre");
   if (state.sim.atmosphere <= coeffs.atmMinVeg) flags.push("atmosphère trop mince pour la vie");
   $("status").innerHTML =
-    `<strong>An ${state.year}</strong> · ${d.temp.toFixed(0)} °C (seuil de surchauffe ${d.overheat.toFixed(0)} °C) · ` +
-    `champ magnétique ${(d.magnetic * 100).toFixed(0)} % · océans ${(d.oceans * 100).toFixed(0)} %` +
+    `<strong>An ${state.year}</strong> · ${d.temp.toFixed(0)} °C (équilibre ${d.equilibriumTemp.toFixed(0)} °C, seuil de surchauffe ${d.overheat.toFixed(0)} °C) · ` +
+    `champ magnétique ${(d.magnetic * 100).toFixed(0)} % · océans ${(d.oceans * 100).toFixed(0)} % · glace ${(d.ice * 100).toFixed(0)} % · ` +
+    `vapeur d'eau ${(d.vapor * 100).toFixed(0)} % · albédo ${(d.albedo * 100).toFixed(0)} % · vent ${d.wind.toFixed(1)}` +
     (flags.length ? `<br>${flags.join(" · ")}` : "");
 }
 
