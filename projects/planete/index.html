@@ -11,14 +11,11 @@
     <div class="toolbar">
       <button id="btn-play" class="primary" type="button">⏸ Pause</button>
       <button id="btn-reset" type="button">↺ Recommencer</button>
-      <select id="in-speed" title="Années simulées par seconde">
-        <option value="1">1 an/s</option>
-        <option value="5">5 ans/s</option>
-        <option value="20" selected>20 ans/s</option>
-        <option value="60">60 ans/s</option>
-        <option value="200">200 ans/s</option>
-      </select>
     </div>
+    <label id="speed-field" title="Années simulées par seconde">
+      <output id="speed-out">20 ans/s</output>
+      <input id="in-speed" type="range" min="1" max="100" step="1" value="20" />
+    </label>
 
     <section>
       <h2>Archétypes</h2>

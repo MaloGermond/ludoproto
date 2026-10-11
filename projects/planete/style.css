@@ -15,9 +15,12 @@ body { display: flex; }
 }
 #panel h2 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
 #panel h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: normal; }
-.toolbar { display: flex; gap: 6px; }
-.toolbar select { flex: 1; }
+.toolbar { display: flex; gap: 6px; align-items: center; }
 .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+#speed-field { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+#speed-field output { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+#speed-field input[type="range"] { flex: 1; margin: 0; }
 
 button, select {
   font: inherit; color: var(--text); background: rgba(255, 255, 255, 0.08);

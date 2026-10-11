@@ -81,7 +81,10 @@ function buildPanel() {
     $("btn-play").textContent = state.playing ? "⏸ Pause" : "▶ Lecture";
   });
   $("btn-reset").addEventListener("click", reset);
-  $("in-speed").addEventListener("change", (e) => { state.speed = +e.target.value; });
+  $("in-speed").addEventListener("input", (e) => {
+    state.speed = +e.target.value;
+    $("speed-out").textContent = `${state.speed} ans/s`;
+  });
   $("btn-coeffs-reset").addEventListener("click", () => {
     for (const k in COEFFS) {
       coeffs[k] = COEFFS[k].value;
@@ -142,7 +145,7 @@ const mix = (a, b, t) => a + (b - a) * t;
 
 function renderSurface(d, rot) {
   const { data } = img;
-  const sea = d.oceans * 0.6;
+  const sea = clampUi(d.oceans);
   const vegAmount = state.sim.vegetation;
   const hotness = clampUi((d.temp - d.overheat) / 40);
   const cold = clampUi((5 - d.temp) / 30);
@@ -158,15 +161,19 @@ function renderSurface(d, rot) {
       const z = Math.sqrt(1 - r2);
       const px = x * cr + z * sr, pz = -x * sr + z * cr;
       const n = fbm(px, y, pz);
+      const m = fbm(px + 40, y + 40, pz + 40);
       let r, g, b;
       if (n < sea) {
         const depth = clampUi((sea - n) / 0.25);
         r = mix(60, 15, depth); g = mix(130, 60, depth); b = mix(200, 140, depth);
+        if (m < vegAmount * 0.9) {
+          // algues / plancton : verdissement de l'eau, la végétation vit aussi en mer
+          r = mix(r, 20, 0.5); g = mix(g, 160, 0.5); b = mix(b, 110, 0.5);
+        }
       } else {
         // roche : grise (froid) → brune → rouge sombre (brûlante)
         r = mix(150, 190, hotness); g = mix(125, 70, hotness); b = mix(95, 40, hotness);
         r = mix(r, 235, cold); g = mix(g, 240, cold); b = mix(b, 250, cold);
-        const m = fbm(px + 40, y + 40, pz + 40);
         if (m < vegAmount * 0.9) {
           // vert luxuriant si l'eau le permet, olive si désertique
           const lush = clampUi(state.fixed.water / 0.5);
