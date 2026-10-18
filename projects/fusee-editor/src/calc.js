@@ -1,6 +1,6 @@
 // Calculs de performance : volumes, masses, delta-v (Tsiolkovski), poussée/poids,
 // coût. Formules provisoires, tous les paramètres viennent de config.json.
-import { copies, copyCount } from "./model.js";
+import { capHeight, copies, copyCount } from "./model.js";
 
 // Largeur d'une rangée de la grille : interpolation base → haut, mesurée au
 // milieu de la rangée.
@@ -15,10 +15,13 @@ export function sectionVolume(s, mod) {
     const w = rowWidth(s, row);
     v += Math.PI * (w / 2) ** 2;
   }
-  // coiffe arrondie : demi-ellipsoïde posé sur la dernière rangée
-  if (s.cap && mod.kind === "payload") {
+  // coiffe posée sur la dernière rangée : demi-ellipsoïde (arrondie) ou cône (pointe)
+  if (mod.kind === "payload" && s.cap === "round") {
     const r = s.wTop / 2;
     v += (2 / 3) * Math.PI * r ** 3 * (mod.roundBonus ?? 1);
+  } else if (mod.kind === "payload" && s.cap === "point") {
+    const r = s.wTop / 2;
+    v += (1 / 3) * Math.PI * r ** 2 * capHeight(s) * (mod.roundBonus ?? 1);
   }
   return v;
 }

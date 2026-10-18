@@ -2,7 +2,7 @@
 // Branche le modèle (src/model.js) et les calculs (src/calc.js) sur un canvas
 // 2D et un panneau DOM. Les données d'équilibrage viennent de config.json.
 import { computeStats } from "./src/calc.js";
-import { addSection, addStage, bounds, copies, createDesign, engineSlots, getSection, maxEngines, removeLastStage, removeSection, setDims, setEngine, setStage, setType } from "./src/model.js";
+import { addSection, addStage, bounds, capHeight, copies, createDesign, engineSlots, getSection, maxEngines, removeLastStage, removeSection, setDims, setEngine, setStage, setType } from "./src/model.js";
 import { REFERENCES } from "./src/references.js";
 
 const $ = (id) => document.getElementById(id);
@@ -73,7 +73,7 @@ function bind() {
   $("in-h").oninput = (e) => act(setDims(design, config, design.selected, { h: +e.target.value }));
   $("in-wb").oninput = (e) => act(setDims(design, config, design.selected, { wBase: +e.target.value }));
   $("in-wt").oninput = (e) => act(setDims(design, config, design.selected, { wTop: +e.target.value }));
-  $("chk-cap").onchange = (e) => ((getSection(design).cap = e.target.checked), refresh());
+  $("sel-cap").onchange = (e) => ((getSection(design).cap = e.target.value || null), refresh());
   $("sel-engine").onchange = (e) => {
     const s = getSection(design);
     setEngine(design, config, s.id, e.target.value, s.engine?.count || 1);
@@ -93,6 +93,13 @@ function bind() {
     refresh();
   };
   $("btn-del").onclick = () => (removeSection(design), refresh());
+  $("stage-list").onclick = (e) => {
+    const id = +e.target.closest("[data-id]")?.dataset.id;
+    if (!id) return;
+    design.selected = id;
+    say("");
+    refresh();
+  };
   cv.addEventListener("click", onCanvasClick);
 }
 
@@ -115,16 +122,36 @@ function refresh() {
     $(`out-${id}`).textContent = `${s[key]} ${label}`;
   }
   const isPayload = config.sections[s.type].kind === "payload";
-  $("chk-cap").disabled = !isPayload;
-  $("chk-cap").checked = s.cap;
+  $("sel-cap").disabled = !isPayload;
+  $("sel-cap").value = s.cap ?? "";
   $("sel-engine").value = s.engine?.type ?? "";
   $("in-engine").value = s.engine?.count ?? 0;
   const type = s.engine?.type ?? ($("sel-engine").value || null);
   $("in-engine").max = maxEngines(s, config, type ?? undefined);
   const slots = engineSlots(s, config);
   $("engine-info").textContent = `Cases sous la base : ${slots.total} · utilisées ${slots.used} · restantes ${slots.remaining}`;
+  renderStageList();
   renderResults();
   draw();
+}
+
+function renderStageList() {
+  const byStage = new Map();
+  for (const s of design.sections) {
+    if (!byStage.has(s.stage)) byStage.set(s.stage, []);
+    byStage.get(s.stage).push(s);
+  }
+  let html = "";
+  for (let k = 1; k <= design.stageCount; k++) {
+    const list = byStage.get(k) ?? [];
+    const color = STAGE_COLOR[(k - 1) % STAGE_COLOR.length];
+    html += `<div class="stage-row"><span class="stage-tag" style="border-color:${color}">É${k}</span>` +
+      (list.length
+        ? list.map((s) => `<button type="button" class="block-chip${s.id === design.selected ? " on" : ""}" data-id="${s.id}">${config.sections[s.type].name}</button>`).join("")
+        : `<span class="muted">(vide)</span>`) +
+      `</div>`;
+  }
+  $("stage-list").innerHTML = html;
 }
 
 function renderResults() {
@@ -157,11 +184,16 @@ function renderResults() {
 
 const GROUND_PAD = 3; // cases sous y=0 pour les tuyères
 
+// vrai si une autre section occupe l'espace juste sous cette copie (moteurs cachés derrière elle)
+function isOnTopOfAnother(s, c) {
+  return design.sections.some((o) => o.id !== s.id && copies(o).some((oc) => Math.abs(oc.y1 - c.y0) < 1e-6 && oc.x0 < c.x1 - 1e-6 && c.x0 < oc.x1 - 1e-6));
+}
+
 function view() {
   const all = design.sections.map(bounds);
   const x0 = Math.min(...all.map((b) => b.x0), -2);
   const x1 = Math.max(...all.map((b) => b.x1), 2);
-  const y1 = Math.max(...all.map((b) => b.y1)) + 4;
+  const y1 = Math.max(...design.sections.map((s) => s.y + s.h + (s.cap ? capHeight(s) : 0))) + 4;
   const W = cv.clientWidth;
   const H = cv.clientHeight;
   const scale = Math.max(2, Math.min(48, (W - 120) / (x1 - x0 + 4), (H - 60) / (y1 + GROUND_PAD)));
@@ -171,15 +203,18 @@ function view() {
 }
 
 function sectionPath(c, s, v) {
-  // trapèze d'une copie (+ calotte arrondie)
+  // trapèze d'une copie (+ calotte arrondie ou pointe)
   const { X, Y } = v;
   const mod = config.sections[s.type];
   const p = new Path2D();
   p.moveTo(X(c.cx - s.wBase / 2), Y(c.y0));
   p.lineTo(X(c.cx + s.wBase / 2), Y(c.y0));
   p.lineTo(X(c.cx + s.wTop / 2), Y(c.y1));
-  if (s.cap && mod.kind === "payload") {
+  if (s.cap === "round" && mod.kind === "payload") {
     p.ellipse(X(c.cx), Y(c.y1), (s.wTop / 2) * v.scale, (s.wTop / 2) * v.scale, 0, 0, -Math.PI, true);
+  } else if (s.cap === "point" && mod.kind === "payload") {
+    p.lineTo(X(c.cx), Y(c.y1 + capHeight(s)));
+    p.lineTo(X(c.cx - s.wTop / 2), Y(c.y1));
   } else {
     p.lineTo(X(c.cx - s.wTop / 2), Y(c.y1));
   }
@@ -220,6 +255,8 @@ function draw() {
     if (!s.engine) continue;
     const e = config.engines[s.engine.type];
     for (const c of copies(s)) {
+      // moteurs masqués par la section du dessous (étage supérieur posé sur un autre) : affichés en transparence
+      ctx.globalAlpha = isOnTopOfAnother(s, c) ? 0.3 : 1;
       const total = s.engine.count * e.width;
       const left = c.cx - total / 2;
       for (let i = 0; i < s.engine.count; i++) {
@@ -236,6 +273,7 @@ function draw() {
       }
     }
   }
+  ctx.globalAlpha = 1;
   for (const s of design.sections) {
     const mod = config.sections[s.type];
     const stageColor = STAGE_COLOR[(s.stage - 1) % STAGE_COLOR.length];
@@ -286,15 +324,19 @@ function onCanvasClick(e) {
   const hit = buttons.find((b) => Math.hypot(b.x - x, b.y - y) <= b.r);
   if (hit) return act(addSection(design, config, hit.side));
   const v = view();
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // isPointInPath applique l'inverse du CTM au point testé ; on neutralise le scale dpr du dernier draw() pour comparer en coordonnées CSS brutes, comme le tracé.
   for (const s of [...design.sections].reverse()) {
     for (const c of copies(s)) {
       if (ctx.isPointInPath(sectionPath(c, s, v), x, y)) {
+        ctx.restore();
         design.selected = s.id;
         say("");
         return refresh();
       }
     }
   }
+  ctx.restore();
 }
 
 boot();
