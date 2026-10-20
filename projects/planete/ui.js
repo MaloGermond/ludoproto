@@ -60,7 +60,6 @@ const sliders = { fixed: {}, initial: {}, coeffs: {} };
 function buildPanel() {
   const fixedDefs = {
     metals:    { label: "Métaux", min: 0, max: 1, step: 0.01 },
-    water:     { label: "H2O initial (eau / glace / vapeur)", min: 0, max: 1, step: 0.01 },
     distance:  { label: "Distance à l'étoile (UA)", min: 0.4, max: 2, step: 0.01 },
     rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01, format: (v) => (v > 0.02 ? `${Math.round(24 / v)} h/jour` : "≥ 1200 h (quasi figée)") },
     volcanism: { label: "Activité volcanique", min: 0, max: 1, step: 0.01 },
@@ -72,8 +71,13 @@ function buildPanel() {
   addSlider($("player"), { label: "Usines", min: 0, max: 100, step: 1, value: state.factories, format: (v) => String(v) },
     (v) => { state.factories = v; });
 
+  // taille/masse et H2O sont dans l'état initial (pas dans Planète) : modifiables d'une
+  // simulation à l'autre, contrairement aux traits physiques immuables (métaux, distance…).
+  // La densité d'atmosphère n'est plus réglable directement : elle est déduite de la
+  // taille/masse (gravité qui retient les gaz dès l'origine).
   const initDefs = {
-    atmosphere: { label: "Densité d'atmosphère", min: 0, max: 2, step: 0.01 },
+    size:       { label: "Taille / masse de la planète", min: 0.05, max: 1.5, step: 0.01 },
+    water:      { label: "H2O initial (eau / glace / vapeur)", min: 0, max: 1, step: 0.01 },
     co2:        { label: "Taux de CO2", min: 0, max: 1, step: 0.005, format: ppm },
     vegetation: { label: "Végétation", min: 0, max: 1, step: 0.01 },
   };
@@ -124,7 +128,7 @@ function loadPreset(key) {
 }
 
 function reset() {
-  state.sim = { ...state.initial, temp: insolation(state.fixed), haze: 0, erosion: 0 };
+  state.sim = { ...state.initial, atmosphere: initialAtmosphere(state.initial, coeffs), temp: insolation(state.fixed), haze: 0, erosion: 0 };
   state.year = 0;
   state.history = [];
   record();

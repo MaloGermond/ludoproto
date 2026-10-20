@@ -53,7 +53,7 @@ details button { margin-top: 12px; }
 .info-row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .flag { margin: 6px 0 0; padding: 6px 8px; background: rgba(255, 154, 138, 0.12); border: 1px solid rgba(255, 154, 138, 0.35); border-radius: 6px; color: #ff9a8a; font-size: 12px; }
 #info #gauges { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-#atmo-pie { display: block; margin: 4px auto 2px; }
+#atmo-pie { display: block; width: 140px; height: 140px; margin: 4px auto 2px; }
 #atmo-legend { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 #atmo-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .gauge .label { display: flex; justify-content: space-between; margin-bottom: 3px; color: var(--muted); }

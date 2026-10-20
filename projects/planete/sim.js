@@ -10,6 +10,8 @@ const COEFFS = {
   magneticRotation:  { label: "Rotation minimale pour l'effet dynamo", value: 0.15, min: 0, max: 0.8, step: 0.01 },
   magneticVolcanism: { label: "Activité volcanique minimale pour l'effet dynamo", value: 0.05, min: 0, max: 0.5, step: 0.01 },
   poleGradient:      { label: "Écart pôle-équateur à rotation nulle (°C)", value: 50, min: 0, max: 150, step: 1 },
+  sizeToAtm:         { label: "Atmosphère initiale par unité de taille/masse", value: 1.2, min: 0, max: 2, step: 0.05 },
+  gravityRetention:  { label: "Réduction de la fuite d'atmosphère par unité de taille/masse", value: 1, min: 0, max: 2, step: 0.05 },
   dissipation:     { label: "Dissipation de l'atmosphère (sans champ)", value: 0.01, min: 0, max: 0.05, step: 0.0005 },
   baseLoss:        { label: "Fuite d'atmosphère résiduelle (avec champ)", value: 0.0002, min: 0, max: 0.01, step: 0.0001 },
   outgassing:      { label: "Dégazage volcanique (avec champ)", value: 0.004, min: 0, max: 0.05, step: 0.0005 },
@@ -66,18 +68,20 @@ const COEFFS = {
   erosionRate:    { label: "Vitesse d'érosion (vent + eau)", value: 0.01, min: 0, max: 0.1, step: 0.001 },
 };
 
-const FIXED_DEFAULTS = { metals: 0.8, water: 0.6, distance: 1, rotation: 0.5, volcanism: 0.3 };
-const DYNAMIC_DEFAULTS = { atmosphere: 0.6, co2: 0.02, vegetation: 0.02 };
+const FIXED_DEFAULTS = { metals: 0.8, distance: 1, rotation: 0.5, volcanism: 0.3 };
+const DYNAMIC_DEFAULTS = { size: 0.5, water: 0.6, co2: 0.02, vegetation: 0.02 };
 
-// Planètes prêtes à l'emploi : 5 variables fixes + état initial.
+// Planètes prêtes à l'emploi : 4 variables fixes + état initial (H2O et taille/masse en
+// font partie : elles peuvent varier d'une simulation à l'autre, contrairement à
+// métaux/distance/rotation/volcanisme qui sont des traits physiques immuables).
 const PRESETS = {
-  ocean:      { label: "Océanique stable",  fixed: { metals: 0.9, water: 0.9, distance: 1,    rotation: 0.5, volcanism: 0.3 },  dynamic: { atmosphere: 0.8, co2: 0.02, vegetation: 0.05 } },
-  desert:     { label: "Désertique",        fixed: { metals: 0.8, water: 0,   distance: 0.85, rotation: 0.6, volcanism: 0.2 },  dynamic: { atmosphere: 0.7, co2: 0.02, vegetation: 0.05 } },
-  greenhouse: { label: "Effet de serre",    fixed: { metals: 0.8, water: 0.3, distance: 0.55, rotation: 0.4, volcanism: 0.5 },  dynamic: { atmosphere: 0.9, co2: 0.1,  vegetation: 0.02 } },
-  dead:       { label: "Morte",             fixed: { metals: 0,   water: 0.5, distance: 1,    rotation: 0.5, volcanism: 0.1 },  dynamic: { atmosphere: 1,   co2: 0.02, vegetation: 0.1 } },
-  venus:      { label: "Vénus (pas de rotation)", fixed: { metals: 0.8, water: 0.3, distance: 0.72, rotation: 0, volcanism: 0.6 }, dynamic: { atmosphere: 0.8, co2: 0.05, vegetation: 0.02 } },
-  volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, water: 0.4, distance: 1,    rotation: 0.3, volcanism: 0.95 }, dynamic: { atmosphere: 0.8, co2: 0.05, vegetation: 0.02 } },
-  glaciation: { label: "Glaciation",        fixed: { metals: 0.8, water: 0.6, distance: 1.6,  rotation: 0.5, volcanism: 0.1 },  dynamic: { atmosphere: 0.6, co2: 0.02, vegetation: 0.05 } },
+  ocean:      { label: "Océanique stable",  fixed: { metals: 0.9, distance: 1,    rotation: 0.5, volcanism: 0.3 },  dynamic: { size: 0.67, water: 0.9, co2: 0.02, vegetation: 0.05 } },
+  desert:     { label: "Désertique",        fixed: { metals: 0.8, distance: 0.85, rotation: 0.6, volcanism: 0.2 },  dynamic: { size: 0.58, water: 0,   co2: 0.02, vegetation: 0.05 } },
+  greenhouse: { label: "Effet de serre",    fixed: { metals: 0.8, distance: 0.55, rotation: 0.4, volcanism: 0.5 },  dynamic: { size: 0.75, water: 0.3, co2: 0.1,  vegetation: 0.02 } },
+  dead:       { label: "Morte",             fixed: { metals: 0,   distance: 1,    rotation: 0.5, volcanism: 0.1 },  dynamic: { size: 0.83, water: 0.5, co2: 0.02, vegetation: 0.1 } },
+  venus:      { label: "Vénus (pas de rotation)", fixed: { metals: 0.8, distance: 0.72, rotation: 0, volcanism: 0.6 }, dynamic: { size: 0.67, water: 0.3, co2: 0.05, vegetation: 0.02 } },
+  volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, distance: 1,    rotation: 0.3, volcanism: 0.95 }, dynamic: { size: 0.67, water: 0.4, co2: 0.05, vegetation: 0.02 } },
+  glaciation: { label: "Glaciation",        fixed: { metals: 0.8, distance: 1.6,  rotation: 0.5, volcanism: 0.1 },  dynamic: { size: 0.5,  water: 0.6, co2: 0.02, vegetation: 0.05 } },
 };
 
 const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
@@ -108,6 +112,12 @@ function insolation(fixed) {
   return 278 / Math.sqrt(fixed.distance) - 273;
 }
 
+// Atmosphère initiale déduite de la taille/masse de la planète (gravité qui retient les gaz
+// dès l'origine) plutôt que réglée à la main.
+function initialAtmosphere(dynamic, c) {
+  return clamp(dynamic.size * c.sizeToAtm, 0, 2);
+}
+
 // Grandeurs déduites de l'état courant (pas de mémoire propre).
 function derive(fixed, s, factories, c) {
   // champ magnétique : effet dynamo, a besoin d'un noyau conducteur (métaux), d'une
@@ -132,16 +142,16 @@ function derive(fixed, s, factories, c) {
   let ice = 0;
   for (const b of LAT_BANDS) {
     const localTemp = temp + gradient * (1 - 2 * b.f);
-    ice += b.w * fixed.water * ramp(c.oceanFreeze - localTemp, 0, c.freezeRange);
+    ice += b.w * s.water * ramp(c.oceanFreeze - localTemp, 0, c.freezeRange);
   }
-  const iceFrac = fixed.water > 0 ? ice / fixed.water : 0;
+  const iceFrac = s.water > 0 ? ice / s.water : 0;
   const boilFrac = ramp(temp - c.oceanBoil, 0, c.boilRange);
   // sans assez de pression atmosphérique, toutes les formes d'eau sont instables (balayées
   // vers l'espace, comme sur Mars) — pas seulement l'océan liquide.
   const pressureOk = s.atmosphere >= c.minPressureLiquid ? 1 : 0;
   ice *= pressureOk;
-  const oceans = fixed.water * clamp(1 - iceFrac - boilFrac) * pressureOk;
-  const vapor = fixed.water * ramp(temp - c.vaporStart, 0, c.vaporRange) * pressureOk;
+  const oceans = s.water * clamp(1 - iceFrac - boilFrac) * pressureOk;
+  const vapor = s.water * ramp(temp - c.vaporStart, 0, c.vaporRange) * pressureOk;
 
   const transparency = clamp(1 - s.haze);
   // albédo : glace (clair, réfléchit) monte, océans et végétation (sombres, absorbent) baissent.
@@ -178,6 +188,7 @@ function derive(fixed, s, factories, c) {
 // Avance l'état d'un an. Retourne le nouvel état (l'ancien n'est pas modifié).
 function step(fixed, s, factories, c) {
   const d = derive(fixed, s, factories, c);
+  const { water, size } = s; // ni l'un ni l'autre n'évolue par pas : simple passage à travers
   let { atmosphere, co2, vegetation, haze, erosion } = s;
 
   // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme),
@@ -185,8 +196,11 @@ function step(fixed, s, factories, c) {
   // d'emballement réaliste (type Vénus) : plus chaud → plus de vapeur → atmosphère plus
   // dense/humide → effet de serre renforcé → encore plus chaud. Les deux sources de
   // reconstitution ont besoin du champ magnétique : sans lui, rien ne compense la fuite et
-  // l'atmosphère s'effondre franchement (pas d'équilibre résiduel artificiel).
-  const loss = c.dissipation * (1 - d.magnetic) + c.baseLoss;
+  // l'atmosphère s'effondre franchement (pas d'équilibre résiduel artificiel). Une planète
+  // plus grande/massive retient aussi mieux ses gaz par sa seule gravité, indépendamment
+  // du champ magnétique.
+  const gravityFactor = clamp(1 - c.gravityRetention * (size - 0.5), 0.1, 2);
+  const loss = (c.dissipation * (1 - d.magnetic) + c.baseLoss) * gravityFactor;
   const lossAmount = atmosphere * loss;
   atmosphere += d.magnetic * (c.outgassing * fixed.volcanism + c.vaporToAtm * d.vapor) * (1 - atmosphere) - lossAmount;
   atmosphere = clamp(atmosphere, 0, 2);
@@ -246,11 +260,11 @@ function step(fixed, s, factories, c) {
   const ease = clamp(c.climateEase - oceanBuffer, 0.02, 1);
   const temp = d.temp + ease * (d.equilibriumTemp - d.temp);
 
-  return { atmosphere, co2, vegetation, comfort, haze, erosion, temp };
+  return { atmosphere, co2, vegetation, comfort, haze, erosion, temp, water, size };
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { COEFFS, PRESETS, FIXED_DEFAULTS, DYNAMIC_DEFAULTS, clamp, coeffValues, insolation, derive, step };
+  module.exports = { COEFFS, PRESETS, FIXED_DEFAULTS, DYNAMIC_DEFAULTS, clamp, coeffValues, insolation, initialAtmosphere, derive, step };
 }
 
 // `npm run sim` : trajectoire des archétypes, sans puis avec 30 usines dès l'an 150.
@@ -258,7 +272,7 @@ if (typeof require !== "undefined" && require.main === module) {
   const c = coeffValues();
   for (const key in PRESETS) {
     const p = PRESETS[key];
-    let s = { ...p.dynamic, temp: insolation(p.fixed), haze: 0, erosion: 0 };
+    let s = { ...p.dynamic, atmosphere: initialAtmosphere(p.dynamic, c), temp: insolation(p.fixed), haze: 0, erosion: 0 };
     const rows = [];
     for (let t = 0; t <= 600; t++) {
       const factories = t >= 150 ? 30 : 0;
