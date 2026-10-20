@@ -24,10 +24,10 @@ const $ = (id) => document.getElementById(id);
 const PPM_PER_UNIT = 10000;
 const ppm = (v) => `${Math.round(v * PPM_PER_UNIT).toLocaleString("fr-FR")} ppm`;
 
-// 1 unité d'H2O normalisée (fixed.water = 1) ≈ l'hydrosphère terrestre totale (océans +
-// glace + vapeur, tous réservoirs confondus, ~1,386 milliard de km³). Les fractions dérivées
-// (océans/glace, déjà exprimées à cette même échelle via `fixed.water`) se convertissent
-// donc directement en volume réel par simple multiplication.
+// 1 unité d'H2O normalisée (water = 1) ≈ l'hydrosphère terrestre totale (océans + glace +
+// vapeur, tous réservoirs confondus, ~1,386 milliard de km³). Les fractions dérivées
+// (océans/glace, déjà exprimées à cette même échelle via `water`) se convertissent donc
+// directement en volume réel par simple multiplication.
 const EARTH_HYDROSPHERE_KM3 = 1.386e9;
 const waterVolume = (fractionOfEarth) => {
   const km3 = fractionOfEarth * EARTH_HYDROSPHERE_KM3;
@@ -201,7 +201,7 @@ function renderSurface(d, rot) {
         r = mix(r, 235, cold); g = mix(g, 240, cold); b = mix(b, 250, cold);
         if (m < vegAmount * 0.9) {
           // vert luxuriant si l'eau le permet, olive si désertique
-          const lush = clampUi(state.fixed.water / 0.5);
+          const lush = clampUi(state.sim.water / 0.5);
           r = mix(120, 40, lush); g = mix(130, 150, lush); b = mix(60, 50, lush);
         }
       }
@@ -229,13 +229,18 @@ function drawPlanet(t) {
   const R = Math.min(w, h) * 0.34;
   const cx = w / 2, cy = h / 2;
 
-  // halo d'atmosphère : bleu → orange selon CO2 / surchauffe
+  // halo d'atmosphère : bleu → orange selon CO2 / surchauffe, puis assombri vers le gris
+  // sombre par les cendres volcaniques en suspension (haze) — plus il y en a, plus le ciel
+  // est opaque et sale, pas seulement teinté.
   const atm = clampUi(state.sim.atmosphere / 1.2);
   const warm = clampUi(state.sim.co2 * 2 + (d.temp > d.overheat ? 0.3 : 0));
-  const hr = Math.round(mix(110, 255, warm)), hg = Math.round(mix(180, 140, warm)), hb = Math.round(mix(255, 70, warm));
+  const haze = clampUi(state.sim.haze);
+  const hr = Math.round(mix(mix(110, 255, warm), 45, haze * 0.85));
+  const hg = Math.round(mix(mix(180, 140, warm), 40, haze * 0.85));
+  const hb = Math.round(mix(mix(255, 70, warm), 38, haze * 0.85));
   const outer = R * (1 + 0.05 + 0.3 * atm);
   const grad = pctx.createRadialGradient(cx, cy, R * 0.97, cx, cy, outer);
-  grad.addColorStop(0, `rgba(${hr},${hg},${hb},${0.7 * atm})`);
+  grad.addColorStop(0, `rgba(${hr},${hg},${hb},${Math.min(1, 0.7 * atm + 0.3 * haze)})`);
   grad.addColorStop(1, `rgba(${hr},${hg},${hb},0)`);
   pctx.fillStyle = grad;
   pctx.beginPath(); pctx.arc(cx, cy, outer, 0, Math.PI * 2); pctx.fill();

@@ -27,6 +27,7 @@ const COEFFS = {
   oceanBoil:         { label: "Température d'ébullition des océans (°C)", value: 100, min: 50, max: 150, step: 1 },
   boilRange:         { label: "Plage d'ébullition progressive des océans (°C)", value: 20, min: 1, max: 40, step: 1 },
   minPressureLiquid: { label: "Pression minimale pour l'eau liquide", value: 0.12, min: 0, max: 0.8, step: 0.01 },
+  waterEscape:       { label: "Fuite irréversible d'H2O vers l'espace (sans pression)", value: 0.01, min: 0, max: 0.1, step: 0.001 },
 
   vaporStart:      { label: "Température de départ de l'évaporation (°C)", value: -10, min: -40, max: 60, step: 1 },
   vaporRange:      { label: "Plage de saturation de la vapeur d'eau (°C)", value: 60, min: 5, max: 120, step: 1 },
@@ -146,12 +147,12 @@ function derive(fixed, s, factories, c) {
   }
   const iceFrac = s.water > 0 ? ice / s.water : 0;
   const boilFrac = ramp(temp - c.oceanBoil, 0, c.boilRange);
-  // sans assez de pression atmosphérique, toutes les formes d'eau sont instables (balayées
-  // vers l'espace, comme sur Mars) — pas seulement l'océan liquide.
+  // sans assez de pression, l'eau liquide bout/sublime tout de suite (comme sur Mars) —
+  // mais la glace et la vapeur, elles, persistent : ce n'est que le stock total (`water`)
+  // qui s'échappe peu à peu vers l'espace (voir step()), pas un interrupteur instantané.
   const pressureOk = s.atmosphere >= c.minPressureLiquid ? 1 : 0;
-  ice *= pressureOk;
   const oceans = s.water * clamp(1 - iceFrac - boilFrac) * pressureOk;
-  const vapor = s.water * ramp(temp - c.vaporStart, 0, c.vaporRange) * pressureOk;
+  const vapor = s.water * ramp(temp - c.vaporStart, 0, c.vaporRange);
 
   const transparency = clamp(1 - s.haze);
   // albédo : glace (clair, réfléchit) monte, océans et végétation (sombres, absorbent) baissent.
@@ -182,14 +183,20 @@ function derive(fixed, s, factories, c) {
   const co2AbsorbVeg = c.vegAbsorb * s.vegetation;
   const co2AbsorbOcean = c.oceanAbsorb * oceans * bioPresence;
 
-  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, transparency, albedo, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean };
+  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, pressureOk, transparency, albedo, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean };
 }
 
 // Avance l'état d'un an. Retourne le nouvel état (l'ancien n'est pas modifié).
 function step(fixed, s, factories, c) {
   const d = derive(fixed, s, factories, c);
-  const { water, size } = s; // ni l'un ni l'autre n'évolue par pas : simple passage à travers
-  let { atmosphere, co2, vegetation, haze, erosion } = s;
+  const { size } = s; // n'évolue jamais : simple passage à travers
+  let { atmosphere, co2, vegetation, haze, erosion, water } = s;
+
+  // sans pression suffisante, l'eau (quelle que soit sa phase) s'échappe peu à peu vers
+  // l'espace, de façon irréversible — contrairement aux fractions glace/océan/vapeur
+  // (dérivées de ce stock), qui elles suivent la température à chaque instant, ce stock ne
+  // revient jamais une fois perdu, même si l'atmosphère se reconstitue plus tard.
+  if (!d.pressureOk) water = Math.max(0, water - c.waterEscape * water);
 
   // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme),
   // et vapeur d'eau qui la rejoint quand les océans chauffent et s'évaporent — boucle
