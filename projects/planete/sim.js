@@ -38,12 +38,15 @@ const COEFFS = {
   albedoIce:         { label: "Albédo supplémentaire de la glace", value: 0.5, min: 0, max: 0.9, step: 0.01 },
   albedoOcean:       { label: "Albédo en moins des océans (sombres)", value: 0.15, min: 0, max: 0.5, step: 0.01 },
   albedoVeg:         { label: "Albédo en moins de la végétation (sombre)", value: 0.05, min: 0, max: 0.3, step: 0.01 },
+  albedoAsh:         { label: "Albédo en moins des cendres au sol (sombres)", value: 0.1, min: 0, max: 0.3, step: 0.01 },
   albedoSensitivity: { label: "Sensibilité de la température à l'albédo (°C)", value: 40, min: 0, max: 100, step: 1 },
 
   ashRate:    { label: "Production de cendres volcaniques", value: 0.05, min: 0, max: 0.3, step: 0.005 },
   ashDecay:   { label: "Vitesse de retombée des cendres", value: 0.03, min: 0, max: 0.3, step: 0.005 },
   ashCooling: { label: "Refroidissement dû aux cendres (°C × opacité)", value: 25, min: 0, max: 60, step: 1 },
   ashRainout: { label: "Lessivage des cendres par la pluie (océans + vapeur)", value: 1, min: 0, max: 5, step: 0.1 },
+  ashDeposit:    { label: "Part des cendres qui se dépose au sol en retombant", value: 0.5, min: 0, max: 1, step: 0.01 },
+  ashWeathering: { label: "Vitesse à laquelle les cendres au sol s'effacent", value: 0.01, min: 0, max: 0.1, step: 0.001 },
 
   climateEase:     { label: "Vitesse de retour à l'équilibre climatique", value: 0.25, min: 0.02, max: 1, step: 0.01 },
   oceanDamping:    { label: "Inertie thermique des océans (ralentit le climat)", value: 0.2, min: 0, max: 0.9, step: 0.01 },
@@ -83,6 +86,29 @@ const PRESETS = {
   venus:      { label: "Vénus (pas de rotation)", fixed: { metals: 0.8, distance: 0.72, rotation: 0, volcanism: 0.6 }, dynamic: { size: 0.67, water: 0.3, co2: 0.05, vegetation: 0.02 } },
   volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, distance: 1,    rotation: 0.3, volcanism: 0.95 }, dynamic: { size: 0.67, water: 0.4, co2: 0.05, vegetation: 0.02 } },
   glaciation: { label: "Glaciation",        fixed: { metals: 0.8, distance: 1.6,  rotation: 0.5, volcanism: 0.1 },  dynamic: { size: 0.5,  water: 0.6, co2: 0.02, vegetation: 0.05 } },
+};
+
+// Missions : un point de départ difficile + un objectif à atteindre en jouant sur les
+// variables fixes (vivantes, pas besoin de relancer) et le nombre d'usines. Contrairement
+// aux archétypes (observer un phénomène), il s'agit de résoudre un problème — le modèle ne
+// s'en sort pas seul, voir `check`.
+const MISSIONS = {
+  co2dome: {
+    label: "Sous un dôme de CO2",
+    brief: "Un siècle d'industrie a saturé l'atmosphère de CO2 : la planète est bien au-dessus du seuil de surchauffe, la vie n'a plus la moindre chance de s'installer. Arrête les usines, et trouve comment faire redescendre la température (distance à l'étoile ? rotation ? volcanisme ?) pour qu'elle ait enfin une chance.",
+    fixed: { metals: 0.8, distance: 1, rotation: 0.5, volcanism: 0.2 },
+    dynamic: { size: 0.6, water: 0.5, co2: 0.6, vegetation: 0 },
+    factories: 0,
+    goal: { label: "Végétation > 20 %", check: (s) => s.vegetation > 0.2 },
+  },
+  iceball: {
+    label: "Boule de glace",
+    brief: "Cette planète (1,13 UA de son étoile, rotation rapide) est prise dans les glaces : sans eau liquide, la végétation plafonne à une petite frange désertique et n'ira jamais plus loin. Ajoute des usines pour produire du CO2, réchauffer suffisamment pour faire fondre la glace — mais pas trop, sous peine de rebasculer dans l'autre excès.",
+    fixed: { metals: 0.8, distance: 1.13, rotation: 0.9, volcanism: 0.15 },
+    dynamic: { size: 0.6, water: 0.6, co2: 0.02, vegetation: 0.02 },
+    factories: 0,
+    goal: { label: "Végétation > 50 %", check: (s) => s.vegetation > 0.5 },
+  },
 };
 
 const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
@@ -156,7 +182,7 @@ function derive(fixed, s, factories, c) {
 
   const transparency = clamp(1 - s.haze);
   // albédo : glace (clair, réfléchit) monte, océans et végétation (sombres, absorbent) baissent.
-  const albedo = clamp(c.albedoBase + c.albedoIce * ice - c.albedoOcean * oceans - c.albedoVeg * s.vegetation, 0.05, 0.9);
+  const albedo = clamp(c.albedoBase + c.albedoIce * ice - c.albedoOcean * oceans - c.albedoVeg * s.vegetation - c.albedoAsh * s.groundAsh, 0.05, 0.9);
 
   // température d'équilibre : insolation ajustée par l'albédo, plus les effets de serre
   // (atmosphère/CO2, vapeur d'eau) et le refroidissement par les cendres volcaniques.
@@ -190,13 +216,16 @@ function derive(fixed, s, factories, c) {
 function step(fixed, s, factories, c) {
   const d = derive(fixed, s, factories, c);
   const { size } = s; // n'évolue jamais : simple passage à travers
-  let { atmosphere, co2, vegetation, haze, erosion, water } = s;
+  let { atmosphere, co2, vegetation, haze, erosion, water, groundAsh } = s;
 
-  // sans pression suffisante, l'eau (quelle que soit sa phase) s'échappe peu à peu vers
-  // l'espace, de façon irréversible — contrairement aux fractions glace/océan/vapeur
-  // (dérivées de ce stock), qui elles suivent la température à chaque instant, ce stock ne
-  // revient jamais une fois perdu, même si l'atmosphère se reconstitue plus tard.
-  if (!d.pressureOk) water = Math.max(0, water - c.waterEscape * water);
+  // sans pression suffisante, l'eau exposée (océans, vapeur) s'échappe peu à peu vers
+  // l'espace, de façon irréversible — mais la glace polaire, elle, est protégée (comme sur
+  // Mars, qui garde sa glace malgré 4 milliards d'années d'atmosphère quasi nulle) : si une
+  // atmosphère se reconstitue plus tard, cette glace redevient une vraie source d'eau.
+  if (!d.pressureOk) {
+    const iceFrac = water > 0 ? d.ice / water : 0;
+    water = Math.max(0, water - c.waterEscape * water * (1 - iceFrac));
+  }
 
   // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme),
   // et vapeur d'eau qui la rejoint quand les océans chauffent et s'évaporent — boucle
@@ -223,8 +252,14 @@ function step(fixed, s, factories, c) {
   // et d'autant plus vite qu'il y a de l'eau liquide ou de la vapeur — la pluie est le
   // principal mécanisme qui lessive les aérosols/cendres de l'atmosphère.
   const rainout = 1 + c.ashRainout * (d.oceans + d.vapor);
-  haze += c.ashRate * fixed.volcanism * (1 - haze) - c.ashDecay * haze * rainout;
+  const ashFalling = c.ashDecay * haze * rainout; // ce qui retombe cette année-là
+  haze += c.ashRate * fixed.volcanism * (1 - haze) - ashFalling;
   haze = clamp(haze, 0, 1);
+
+  // une partie de ce qui retombe se dépose au sol et s'accumule (assombrit la surface,
+  // voir ui.js) ; lentement recouvert/érodé avec le temps, sinon une éruption ancienne
+  // resterait visible pour toujours.
+  groundAsh = clamp(groundAsh + ashFalling * c.ashDeposit - groundAsh * c.ashWeathering, 0, 1);
 
   // érosion : suivie pour complétude (vent + eau/glace), sans effet en aval dans ce modèle
   erosion = clamp(erosion + c.erosionRate * d.wind * (d.oceans + d.ice), 0, 1);
@@ -267,11 +302,11 @@ function step(fixed, s, factories, c) {
   const ease = clamp(c.climateEase - oceanBuffer, 0.02, 1);
   const temp = d.temp + ease * (d.equilibriumTemp - d.temp);
 
-  return { atmosphere, co2, vegetation, comfort, haze, erosion, temp, water, size };
+  return { atmosphere, co2, vegetation, comfort, haze, erosion, temp, water, size, groundAsh };
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { COEFFS, PRESETS, FIXED_DEFAULTS, DYNAMIC_DEFAULTS, clamp, coeffValues, insolation, initialAtmosphere, derive, step };
+  module.exports = { COEFFS, PRESETS, MISSIONS, FIXED_DEFAULTS, DYNAMIC_DEFAULTS, clamp, coeffValues, insolation, initialAtmosphere, derive, step };
 }
 
 // `npm run sim` : trajectoire des archétypes, sans puis avec 30 usines dès l'an 150.
@@ -279,7 +314,7 @@ if (typeof require !== "undefined" && require.main === module) {
   const c = coeffValues();
   for (const key in PRESETS) {
     const p = PRESETS[key];
-    let s = { ...p.dynamic, atmosphere: initialAtmosphere(p.dynamic, c), temp: insolation(p.fixed), haze: 0, erosion: 0 };
+    let s = { ...p.dynamic, atmosphere: initialAtmosphere(p.dynamic, c), temp: insolation(p.fixed), haze: 0, erosion: 0, groundAsh: 0 };
     const rows = [];
     for (let t = 0; t <= 600; t++) {
       const factories = t >= 150 ? 30 : 0;

@@ -13,9 +13,14 @@
       <button id="btn-reset" type="button">↺ Recommencer</button>
     </div>
     <label id="speed-field" title="Années simulées par seconde">
-      <output id="speed-out">20 ans/s</output>
-      <input id="in-speed" type="range" min="1" max="100" step="1" value="20" />
+      <output id="speed-out">10 ans/s</output>
+      <input id="in-speed" type="range" min="1" max="100" step="1" value="10" />
     </label>
+
+    <details open>
+      <summary>Missions</summary>
+      <div id="missions" class="presets"></div>
+    </details>
 
     <details open>
       <summary>Archétypes</summary>
@@ -51,6 +56,7 @@
 
   <aside id="info">
     <h2>Planète <small id="year-out"></small></h2>
+    <div id="mission-status"></div>
     <div id="status" class="readout"></div>
     <div id="flags"></div>
     <h3>Atmosphère <small id="atmo-density-out"></small></h3>

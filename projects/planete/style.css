@@ -47,6 +47,10 @@ details button { margin-top: 12px; }
 }
 #info h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
 #info h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: normal; }
+.mission-box { padding: 8px 10px; margin-bottom: 10px; border-radius: 6px; font-size: 12px; line-height: 1.4; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); }
+.mission-box .goal { margin-top: 6px; font-weight: 600; }
+.mission-box.won { background: rgba(130, 255, 170, 0.12); border-color: rgba(130, 255, 170, 0.5); }
+.mission-box.won .goal { color: #8cffb0; }
 #info h3 { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .info-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
 .info-row span:first-child { color: var(--muted); }

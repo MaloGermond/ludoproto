@@ -9,7 +9,8 @@ const state = {
   year: 0,
   history: [],
   playing: true,
-  speed: 20,
+  speed: 10,
+  activeMission: null,
 };
 const coeffs = coeffValues();
 const HISTORY_MAX = 600;
@@ -61,14 +62,16 @@ function buildPanel() {
   const fixedDefs = {
     metals:    { label: "Métaux", min: 0, max: 1, step: 0.01 },
     distance:  { label: "Distance à l'étoile (UA)", min: 0.4, max: 2, step: 0.01 },
-    rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01, format: (v) => (v > 0.02 ? `${Math.round(24 / v)} h/jour` : "≥ 1200 h (quasi figée)") },
+    // 0.5 (valeur « terrestre » par défaut ailleurs dans le modèle) = 24 h/jour ; au-delà,
+    // on va plus vite que la Terre (jusqu'à ~12 h/jour à fond, proche de Jupiter/Saturne).
+    rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01, format: (v) => (v > 0.01 ? `${Math.round(12 / v)} h/jour` : "≥ 1200 h (quasi figée)") },
     volcanism: { label: "Activité volcanique", min: 0, max: 1, step: 0.01 },
   };
   for (const k in fixedDefs) {
     sliders.fixed[k] = addSlider($("fixed"), { ...fixedDefs[k], value: state.fixed[k] }, (v) => { state.fixed[k] = v; });
   }
 
-  addSlider($("player"), { label: "Usines", min: 0, max: 100, step: 1, value: state.factories, format: (v) => String(v) },
+  sliders.player = addSlider($("player"), { label: "Usines", min: 0, max: 100, step: 1, value: state.factories, format: (v) => String(v) },
     (v) => { state.factories = v; });
 
   // taille/masse et H2O sont dans l'état initial (pas dans Planète) : modifiables d'une
@@ -101,6 +104,14 @@ function buildPanel() {
     $("presets").append(b);
   }
 
+  for (const key in MISSIONS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = MISSIONS[key].label;
+    b.addEventListener("click", () => loadMission(key));
+    $("missions").append(b);
+  }
+
   $("btn-play").addEventListener("click", () => {
     state.playing = !state.playing;
     $("btn-play").textContent = state.playing ? "⏸ Pause" : "▶ Lecture";
@@ -120,6 +131,7 @@ function buildPanel() {
 
 function loadPreset(key) {
   const p = PRESETS[key];
+  state.activeMission = null;
   Object.assign(state.fixed, p.fixed);
   Object.assign(state.initial, p.dynamic);
   for (const k in p.fixed) sliders.fixed[k].set(p.fixed[k]);
@@ -127,8 +139,22 @@ function loadPreset(key) {
   reset();
 }
 
+// Missions : comme un preset, mais avec un nombre d'usines de départ et un objectif
+// suivi en direct (voir updateStatus) plutôt qu'un simple point de départ à observer.
+function loadMission(key) {
+  const m = MISSIONS[key];
+  state.activeMission = key;
+  Object.assign(state.fixed, m.fixed);
+  Object.assign(state.initial, m.dynamic);
+  state.factories = m.factories ?? 0;
+  for (const k in m.fixed) sliders.fixed[k].set(m.fixed[k]);
+  for (const k in m.dynamic) sliders.initial[k].set(m.dynamic[k]);
+  sliders.player.set(state.factories);
+  reset();
+}
+
 function reset() {
-  state.sim = { ...state.initial, atmosphere: initialAtmosphere(state.initial, coeffs), temp: insolation(state.fixed), haze: 0, erosion: 0 };
+  state.sim = { ...state.initial, atmosphere: initialAtmosphere(state.initial, coeffs), temp: insolation(state.fixed), haze: 0, erosion: 0, groundAsh: 0 };
   state.year = 0;
   state.history = [];
   record();
@@ -174,6 +200,11 @@ function renderSurface(d, rot) {
   const vegAmount = state.sim.vegetation;
   const hotness = clampUi((d.temp - d.overheat) / 40);
   const cold = clampUi((5 - d.temp) / 30);
+  // calotte polaire visible : même écart pôle-équateur que dans le modèle (lié à la
+  // rotation), pour que sa taille à l'écran corresponde à ce que montre le panneau de
+  // droite, pas seulement à la température globale.
+  const gradient = coeffs.poleGradient * (1 - state.fixed.rotation);
+  const ash = clampUi(d.groundAsh ?? 0);
   const lx = -0.5, ly = -0.4, lz = 0.76;
   const cr = Math.cos(rot), sr = Math.sin(rot);
   for (let j = 0; j < PLANET_RES; j++) {
@@ -187,6 +218,10 @@ function renderSurface(d, rot) {
       const px = x * cr + z * sr, pz = -x * sr + z * cr;
       const n = fbm(px, y, pz);
       const m = fbm(px + 40, y + 40, pz + 40);
+      // y (axe de rotation) donne directement la latitude, peu importe la rotation
+      const localTemp = d.temp + gradient * (1 - 2 * Math.abs(y));
+      const iceLocal = ramp(coeffs.oceanFreeze - localTemp, 0, coeffs.freezeRange);
+      const frost = Math.max(cold, iceLocal);
       let r, g, b;
       if (n < sea) {
         const depth = clampUi((sea - n) / 0.25);
@@ -198,13 +233,16 @@ function renderSurface(d, rot) {
       } else {
         // roche : grise (froid) → brune → rouge sombre (brûlante)
         r = mix(150, 190, hotness); g = mix(125, 70, hotness); b = mix(95, 40, hotness);
-        r = mix(r, 235, cold); g = mix(g, 240, cold); b = mix(b, 250, cold);
         if (m < vegAmount * 0.9) {
           // vert luxuriant si l'eau le permet, olive si désertique
           const lush = clampUi(state.sim.water / 0.5);
           r = mix(120, 40, lush); g = mix(130, 150, lush); b = mix(60, 50, lush);
         }
       }
+      // calotte de glace (pôle ou planète entière si assez froide), par-dessus mer/terre
+      r = mix(r, 235, frost); g = mix(g, 240, frost); b = mix(b, 250, frost);
+      // cendres volcaniques déposées au sol : noircissent, sauf sous la glace
+      r = mix(r, 25, ash * (1 - frost)); g = mix(g, 22, ash * (1 - frost)); b = mix(b, 20, ash * (1 - frost));
       const light = 0.25 + 0.75 * Math.max(0, x * lx + y * ly + z * lz);
       data[o] = r * light; data[o + 1] = g * light; data[o + 2] = b * light; data[o + 3] = 255;
     }
@@ -275,18 +313,28 @@ function updateGauges() {
   }
 }
 
+function updateMissionStatus() {
+  if (!state.activeMission) { $("mission-status").innerHTML = ""; return; }
+  const m = MISSIONS[state.activeMission];
+  const won = m.goal.check(state.sim);
+  $("mission-status").innerHTML =
+    `<div class="mission-box${won ? " won" : ""}"><strong>${m.label}</strong><p>${m.brief}</p>` +
+    `<div class="goal">${won ? "✓ Objectif atteint : " : "Objectif : "}${m.goal.label}</div></div>`;
+}
+
 function updateStatus() {
   const d = derive(state.fixed, state.sim, state.factories, coeffs);
   $("year-out").textContent = `an ${state.year}`;
+  updateMissionStatus();
 
   const rows = [
     ["Température", `${d.temp.toFixed(0)} °C`],
     ["Équilibre radiatif", `${d.equilibriumTemp.toFixed(0)} °C`],
     ["Seuil de surchauffe", `${d.overheat.toFixed(0)} °C`],
     ["Champ magnétique", `${(d.magnetic * 100).toFixed(0)} %`],
+    ["Eau totale (H2O)", waterVolume(state.sim.water)],
     ["Océans", waterVolume(d.oceans)],
     ["Glace", waterVolume(d.ice)],
-    ["Vapeur d'eau", ppm(d.vapor)],
     ["Albédo", `${(d.albedo * 100).toFixed(0)} %`],
     ["Vent", d.wind.toFixed(1)],
     ["Captation CO2 (vivant)", `${(d.co2AbsorbVeg * 100).toFixed(1)} %/an`],
@@ -418,11 +466,12 @@ function drawChart() {
 
 // ---------- boucle ----------
 
-let last = performance.now(), acc = 0;
+let last = performance.now(), acc = 0, rotTime = 0;
 function frame(now) {
   const dt = Math.min(0.25, (now - last) / 1000);
   last = now;
   if (state.playing) {
+    rotTime += dt * 1000; // ne s'accumule que pendant la lecture : la planète s'arrête en pause
     acc += dt * state.speed;
     while (acc >= 1) {
       state.sim = step(state.fixed, state.sim, state.factories, coeffs);
@@ -431,7 +480,7 @@ function frame(now) {
       acc -= 1;
     }
   }
-  drawPlanet(now);
+  drawPlanet(rotTime);
   updateGauges();
   updateStatus();
   drawChart();
