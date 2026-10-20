@@ -13,8 +13,6 @@ body { display: flex; }
   width: 320px; flex: none; height: 100%; overflow-y: auto; padding: 14px;
   background: var(--panel); border-right: 1px solid var(--line);
 }
-#panel h2 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
-#panel h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: normal; }
 .toolbar { display: flex; gap: 6px; align-items: center; }
 .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
@@ -35,21 +33,35 @@ select option { background: var(--panel); }
 .field output { float: right; font-variant-numeric: tabular-nums; color: var(--muted); }
 .field input[type="range"] { width: 100%; margin: 4px 0 0; }
 details { margin-top: 18px; }
-summary { cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.06em; }
+summary { cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.06em; margin-bottom: 6px; }
+summary small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: normal; }
 details button { margin-top: 12px; }
 
 #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-#status { padding: 12px 16px 0; min-height: 44px; color: var(--muted); }
-#status strong { color: var(--text); }
 #planet { flex: 1; min-height: 0; width: 100%; }
-#gauges { display: flex; gap: 10px; padding: 0 16px; }
-.gauge { flex: 1; }
+#chart { width: 100%; height: 180px; flex: none; }
+
+#info {
+  width: 280px; flex: none; height: 100%; overflow-y: auto; padding: 14px;
+  background: var(--panel); border-left: 1px solid var(--line);
+}
+#info h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
+#info h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: normal; }
+#info h3 { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.info-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.info-row span:first-child { color: var(--muted); }
+.info-row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.flag { margin: 6px 0 0; padding: 6px 8px; background: rgba(255, 154, 138, 0.12); border: 1px solid rgba(255, 154, 138, 0.35); border-radius: 6px; color: #ff9a8a; font-size: 12px; }
+#info #gauges { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+#atmo-pie { display: block; margin: 4px auto 2px; }
+#atmo-legend { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+#atmo-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .gauge .label { display: flex; justify-content: space-between; margin-bottom: 3px; color: var(--muted); }
 .gauge .bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
 .gauge .bar i { display: block; height: 100%; }
-#chart { width: 100%; height: 180px; flex: none; }
 
-@media (max-width: 700px) {
-  body { flex-direction: column; }
-  #panel { width: 100%; height: 45%; border-right: 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 900px) {
+  body { flex-direction: column; height: auto; min-height: 100%; }
+  #panel, #info { width: 100%; height: auto; max-height: 40%; border: 0; border-bottom: 1px solid var(--line); }
+  #stage { min-height: 50vh; }
 }

@@ -6,7 +6,10 @@
 
 // Coefficients d'équilibrage : seuils et vitesses, tous modifiables dans l'UI.
 const COEFFS = {
-  magneticMetals:  { label: "Métaux pour un champ magnétique complet", value: 0.3, min: 0.05, max: 1, step: 0.01 },
+  magneticMetals:    { label: "Métaux pour un champ magnétique complet", value: 0.3, min: 0.05, max: 1, step: 0.01 },
+  magneticRotation:  { label: "Rotation minimale pour l'effet dynamo", value: 0.15, min: 0, max: 0.8, step: 0.01 },
+  magneticVolcanism: { label: "Activité volcanique minimale pour l'effet dynamo", value: 0.05, min: 0, max: 0.5, step: 0.01 },
+  poleGradient:      { label: "Écart pôle-équateur à rotation nulle (°C)", value: 50, min: 0, max: 150, step: 1 },
   dissipation:     { label: "Dissipation de l'atmosphère (sans champ)", value: 0.01, min: 0, max: 0.05, step: 0.0005 },
   baseLoss:        { label: "Fuite d'atmosphère résiduelle (avec champ)", value: 0.0002, min: 0, max: 0.01, step: 0.0001 },
   outgassing:      { label: "Dégazage volcanique (avec champ)", value: 0.004, min: 0, max: 0.05, step: 0.0005 },
@@ -26,6 +29,7 @@ const COEFFS = {
   vaporStart:      { label: "Température de départ de l'évaporation (°C)", value: -10, min: -40, max: 60, step: 1 },
   vaporRange:      { label: "Plage de saturation de la vapeur d'eau (°C)", value: 60, min: 5, max: 120, step: 1 },
   vaporGreenhouse: { label: "Effet de serre de la vapeur d'eau (°C × vapeur)", value: 25, min: 0, max: 80, step: 1 },
+  vaporToAtm:      { label: "Vapeur d'eau rejoignant l'atmosphère (évaporation)", value: 0.01, min: 0, max: 0.05, step: 0.001 },
 
   albedoBase:        { label: "Albédo de base (roche nue)", value: 0.3, min: 0, max: 0.9, step: 0.01 },
   albedoIce:         { label: "Albédo supplémentaire de la glace", value: 0.5, min: 0, max: 0.9, step: 0.01 },
@@ -36,9 +40,11 @@ const COEFFS = {
   ashRate:    { label: "Production de cendres volcaniques", value: 0.05, min: 0, max: 0.3, step: 0.005 },
   ashDecay:   { label: "Vitesse de retombée des cendres", value: 0.03, min: 0, max: 0.3, step: 0.005 },
   ashCooling: { label: "Refroidissement dû aux cendres (°C × opacité)", value: 25, min: 0, max: 60, step: 1 },
+  ashRainout: { label: "Lessivage des cendres par la pluie (océans + vapeur)", value: 1, min: 0, max: 5, step: 0.1 },
 
-  climateEase:  { label: "Vitesse de retour à l'équilibre climatique", value: 0.25, min: 0.02, max: 1, step: 0.01 },
-  oceanDamping: { label: "Inertie thermique des océans (ralentit le climat)", value: 0.2, min: 0, max: 0.9, step: 0.01 },
+  climateEase:     { label: "Vitesse de retour à l'équilibre climatique", value: 0.25, min: 0.02, max: 1, step: 0.01 },
+  oceanDamping:    { label: "Inertie thermique des océans (ralentit le climat)", value: 0.2, min: 0, max: 0.9, step: 0.01 },
+  oceanWarmBuffer: { label: "Océans : capacité supplémentaire à absorber un réchauffement", value: 2, min: 1, max: 5, step: 0.1 },
 
   overheatRef:     { label: "Seuil de surchauffe à 1 UA (°C)", value: 45, min: 20, max: 100, step: 1 },
   overheatDist:    { label: "Sensibilité du seuil à la distance", value: 0.5, min: 0, max: 1, step: 0.05 },
@@ -69,6 +75,7 @@ const PRESETS = {
   desert:     { label: "Désertique",        fixed: { metals: 0.8, water: 0,   distance: 0.85, rotation: 0.6, volcanism: 0.2 },  dynamic: { atmosphere: 0.7, co2: 0.02, vegetation: 0.05 } },
   greenhouse: { label: "Effet de serre",    fixed: { metals: 0.8, water: 0.3, distance: 0.55, rotation: 0.4, volcanism: 0.5 },  dynamic: { atmosphere: 0.9, co2: 0.1,  vegetation: 0.02 } },
   dead:       { label: "Morte",             fixed: { metals: 0,   water: 0.5, distance: 1,    rotation: 0.5, volcanism: 0.1 },  dynamic: { atmosphere: 1,   co2: 0.02, vegetation: 0.1 } },
+  venus:      { label: "Vénus (pas de rotation)", fixed: { metals: 0.8, water: 0.3, distance: 0.72, rotation: 0, volcanism: 0.6 }, dynamic: { atmosphere: 0.8, co2: 0.05, vegetation: 0.02 } },
   volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, water: 0.4, distance: 1,    rotation: 0.3, volcanism: 0.95 }, dynamic: { atmosphere: 0.8, co2: 0.05, vegetation: 0.02 } },
   glaciation: { label: "Glaciation",        fixed: { metals: 0.8, water: 0.6, distance: 1.6,  rotation: 0.5, volcanism: 0.1 },  dynamic: { atmosphere: 0.6, co2: 0.02, vegetation: 0.05 } },
 };
@@ -76,6 +83,19 @@ const PRESETS = {
 const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
 // Rampe lissée : 0 avant `from`, 1 après `from + range`, linéaire entre les deux.
 const ramp = (x, from, range) => clamp((x - from) / range);
+
+// Bandes de latitude équateur→pôle (5 bandes de 18°), pour calculer une calotte polaire de
+// taille variable plutôt qu'une seule température globale. `w` = poids (fraction de la
+// surface d'une sphère couverte par cette bande, aire d'une zone sphérique = sin(haut)−sin(bas)
+// en radians, les deux hémisphères étant symétriques). `f` = position pôle↔équateur (0 =
+// équateur, 1 = pôle), au centre de la bande, utilisée pour interpoler sa température locale.
+const LAT_BANDS = [
+  { w: 0.309, f: 0.1 },
+  { w: 0.279, f: 0.3 },
+  { w: 0.221, f: 0.5 },
+  { w: 0.142, f: 0.7 },
+  { w: 0.049, f: 0.9 },
+];
 
 function coeffValues() {
   const c = {};
@@ -90,19 +110,38 @@ function insolation(fixed) {
 
 // Grandeurs déduites de l'état courant (pas de mémoire propre).
 function derive(fixed, s, factories, c) {
-  const magnetic = clamp(fixed.metals / c.magneticMetals);
+  // champ magnétique : effet dynamo, a besoin d'un noyau conducteur (métaux), d'une
+  // rotation suffisante pour le brasser, ET d'une chaleur interne suffisante pour le faire
+  // convecter (activité volcanique, indice de l'énergie interne disponible) — il manque
+  // n'importe lequel des trois et il n'y a aucun champ, comme Vénus (métaux mais rotation
+  // quasi nulle) ou une planète refroidie et géologiquement morte (plus de convection).
+  const magnetic = clamp(fixed.metals / c.magneticMetals)
+    * ramp(fixed.rotation, 0, c.magneticRotation)
+    * ramp(fixed.volcanism, 0, c.magneticVolcanism);
   const baseTemp = insolation(fixed);
   const temp = s.temp;
 
   // glace / océans / vapeur : rampes lissées autour des points de gel et d'ébullition,
   // l'eau liquide a aussi besoin d'une pression (atmosphère) suffisante — sinon elle est
   // instable comme sur Mars, même si la température le permettrait.
-  const iceFrac = ramp(c.oceanFreeze - temp, 0, c.freezeRange);
+  // La calotte polaire est calculée par bandes de latitude plutôt que sur la seule
+  // moyenne globale : une rotation lente redistribue mal la chaleur (écart pôle-équateur
+  // marqué, extrêmes plus forts), ce qui peut donner une grande calotte même si la
+  // moyenne globale reste tempérée — et sa taille pèse directement sur l'albédo.
+  const gradient = c.poleGradient * (1 - fixed.rotation);
+  let ice = 0;
+  for (const b of LAT_BANDS) {
+    const localTemp = temp + gradient * (1 - 2 * b.f);
+    ice += b.w * fixed.water * ramp(c.oceanFreeze - localTemp, 0, c.freezeRange);
+  }
+  const iceFrac = fixed.water > 0 ? ice / fixed.water : 0;
   const boilFrac = ramp(temp - c.oceanBoil, 0, c.boilRange);
+  // sans assez de pression atmosphérique, toutes les formes d'eau sont instables (balayées
+  // vers l'espace, comme sur Mars) — pas seulement l'océan liquide.
   const pressureOk = s.atmosphere >= c.minPressureLiquid ? 1 : 0;
-  const ice = fixed.water * iceFrac;
+  ice *= pressureOk;
   const oceans = fixed.water * clamp(1 - iceFrac - boilFrac) * pressureOk;
-  const vapor = fixed.water * ramp(temp - c.vaporStart, 0, c.vaporRange);
+  const vapor = fixed.water * ramp(temp - c.vaporStart, 0, c.vaporRange) * pressureOk;
 
   const transparency = clamp(1 - s.haze);
   // albédo : glace (clair, réfléchit) monte, océans et végétation (sombres, absorbent) baissent.
@@ -117,12 +156,23 @@ function derive(fixed, s, factories, c) {
     - c.ashCooling * s.haze;
 
   const overheat = c.overheatRef * (1 - c.overheatDist + c.overheatDist * fixed.distance);
-  // la végétation (terrestre + marine) est plafonnée par la couverture d'océan actuelle
-  const vegCap = oceans < 0.1 ? c.desertCap : c.desertCap + (1 - c.desertCap) * clamp(oceans / 0.5);
+  // la végétation (terrestre + marine) est plafonnée par la couverture d'océan actuelle,
+  // et une atmosphère mince limite aussi la densité de vie que le sol peut soutenir à
+  // terme (pas seulement la vitesse à laquelle elle s'installe) : CO2/O2 disponibles,
+  // rétention de l'eau, protection contre les UV.
+  const oceanCap = oceans < 0.1 ? c.desertCap : c.desertCap + (1 - c.desertCap) * clamp(oceans / 0.5);
+  const vegCap = oceanCap * clamp(s.atmosphere / 0.5);
   // vent : rotation rapide et atmosphère dense amplifient l'effet d'un écart thermique
   const wind = c.windRotation * fixed.rotation + c.windAtmosphere * s.atmosphere * clamp(Math.abs(temp - baseTemp) / 40);
+  // part du CO2 atmosphérique captée chaque année, par le vivant terrestre et par le
+  // phytoplancton océanique. Les deux retombent à 0 sans végétation : dans ce modèle,
+  // c'est la vie (pas l'eau en elle-même) qui capte le CO2 — pas de biosphère, pas de
+  // régulation du climat.
+  const bioPresence = ramp(s.vegetation, 0, c.lifeSeed * 20);
+  const co2AbsorbVeg = c.vegAbsorb * s.vegetation;
+  const co2AbsorbOcean = c.oceanAbsorb * oceans * bioPresence;
 
-  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, transparency, albedo, overheat, vegCap, wind };
+  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, transparency, albedo, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean };
 }
 
 // Avance l'état d'un an. Retourne le nouvel état (l'ancien n'est pas modifié).
@@ -130,21 +180,29 @@ function step(fixed, s, factories, c) {
   const d = derive(fixed, s, factories, c);
   let { atmosphere, co2, vegetation, haze, erosion } = s;
 
-  // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme)
+  // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme),
+  // et vapeur d'eau qui la rejoint quand les océans chauffent et s'évaporent — boucle
+  // d'emballement réaliste (type Vénus) : plus chaud → plus de vapeur → atmosphère plus
+  // dense/humide → effet de serre renforcé → encore plus chaud. Les deux sources de
+  // reconstitution ont besoin du champ magnétique : sans lui, rien ne compense la fuite et
+  // l'atmosphère s'effondre franchement (pas d'équilibre résiduel artificiel).
   const loss = c.dissipation * (1 - d.magnetic) + c.baseLoss;
   const lossAmount = atmosphere * loss;
-  atmosphere += c.outgassing * fixed.volcanism * d.magnetic * (1 - atmosphere) - lossAmount;
+  atmosphere += d.magnetic * (c.outgassing * fixed.volcanism + c.vaporToAtm * d.vapor) * (1 - atmosphere) - lossAmount;
   atmosphere = clamp(atmosphere, 0, 2);
 
   // CO2 : usines + volcans (mis à l'échelle du volcanisme), absorbé par végétation et
   // océans, emporté avec l'atmosphère
   co2 += factories * c.factoryCo2 + c.volcanicCo2 * fixed.volcanism * d.magnetic;
-  co2 -= co2 * (c.vegAbsorb * vegetation + c.oceanAbsorb * d.oceans);
+  co2 -= co2 * (d.co2AbsorbVeg + d.co2AbsorbOcean);
   co2 -= co2 * loss;
   co2 = clamp(co2, 0, 1);
 
   // cendres volcaniques : montent avec le volcanisme, retombent seules (boucle stabilisatrice)
-  haze += c.ashRate * fixed.volcanism * (1 - haze) - c.ashDecay * haze;
+  // et d'autant plus vite qu'il y a de l'eau liquide ou de la vapeur — la pluie est le
+  // principal mécanisme qui lessive les aérosols/cendres de l'atmosphère.
+  const rainout = 1 + c.ashRainout * (d.oceans + d.vapor);
+  haze += c.ashRate * fixed.volcanism * (1 - haze) - c.ashDecay * haze * rainout;
   haze = clamp(haze, 0, 1);
 
   // érosion : suivie pour complétude (vent + eau/glace), sans effet en aval dans ce modèle
@@ -161,13 +219,16 @@ function step(fixed, s, factories, c) {
 
   // végétation : croît si atmosphère + température OK ; le CO2 qu'elle consomme la
   // fait pousser plus vite (fertilisation) jusqu'à un seuil au-delà duquel il devient
-  // toxique. S'effondre aussi en cas de surchauffe.
+  // toxique. S'effondre aussi en cas de surchauffe. Les cendres volcaniques en
+  // suspension bloquent une partie de la lumière (et retombent sur les feuilles),
+  // ce qui ralentit directement la croissance (en plus du refroidissement qu'elles
+  // provoquent déjà sur le climat via `ashCooling`).
   const lifeOk = atmosphere > c.atmMinVeg && d.temp < d.overheat;
   if (lifeOk) {
     const co2Fert = clamp(co2 / c.co2Optimal);
     const boost = 1 + c.co2Boost * co2Fert;
-    vegetation += c.growth * vegetation * (1 - vegetation / d.vegCap) * clamp(atmosphere / 0.5) * tempFactor * boost;
-    if (vegetation < c.lifeSeed * 20) vegetation += c.lifeSeed * tempFactor;
+    vegetation += c.growth * vegetation * (1 - vegetation / d.vegCap) * tempFactor * boost * d.transparency;
+    if (vegetation < c.lifeSeed * 20) vegetation += c.lifeSeed * tempFactor * d.transparency;
   }
   if (d.temp > d.overheat) vegetation -= vegetation * c.collapse * ((d.temp - d.overheat) / 10);
   if (co2 > c.co2Toxic) vegetation -= vegetation * c.co2Damage * clamp((co2 - c.co2Toxic) / Math.max(0.01, 1 - c.co2Toxic));
@@ -176,8 +237,13 @@ function step(fixed, s, factories, c) {
   vegetation = clamp(vegetation, 0, 1);
 
   // température : s'approche de l'équilibre climatique, ralentie par l'inertie thermique
-  // des océans (boucle stabilisatrice : plus d'océans → climat plus lent à changer).
-  const ease = clamp(c.climateEase - c.oceanDamping * d.oceans, 0.02, 1);
+  // des océans. Cette inertie est plus forte à la hausse qu'à la baisse : les océans
+  // absorbent préférentiellement l'excès de chaleur (comme dans la réalité, où ils captent
+  // l'essentiel du réchauffement) — un même écart à l'équilibre se résorbe donc plus
+  // lentement en se réchauffant qu'en se refroidissant.
+  const warming = d.equilibriumTemp > d.temp;
+  const oceanBuffer = c.oceanDamping * d.oceans * (warming ? c.oceanWarmBuffer : 1);
+  const ease = clamp(c.climateEase - oceanBuffer, 0.02, 1);
   const temp = d.temp + ease * (d.equilibriumTemp - d.temp);
 
   return { atmosphere, co2, vegetation, comfort, haze, erosion, temp };

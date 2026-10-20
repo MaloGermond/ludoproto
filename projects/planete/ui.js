@@ -16,6 +16,25 @@ const HISTORY_MAX = 600;
 
 const $ = (id) => document.getElementById(id);
 
+// 1 unité de concentration normalisée (0–1) du modèle ≈ 10 000 ppm — calibré pour que les
+// valeurs usuelles restent lisibles (CO2 initial ~0.02 → 200 ppm, proche du pré-industriel
+// réel ; seuil toxique 0.3 → 3 000 ppm, dans l'ordre de grandeur des seuils de toxicité du
+// CO2 pour l'humain). Appliqué pareil au CO2 et à la vapeur d'eau (H2O gazeux), pour rester
+// cohérent entre les deux gaz traces.
+const PPM_PER_UNIT = 10000;
+const ppm = (v) => `${Math.round(v * PPM_PER_UNIT).toLocaleString("fr-FR")} ppm`;
+
+// 1 unité d'H2O normalisée (fixed.water = 1) ≈ l'hydrosphère terrestre totale (océans +
+// glace + vapeur, tous réservoirs confondus, ~1,386 milliard de km³). Les fractions dérivées
+// (océans/glace, déjà exprimées à cette même échelle via `fixed.water`) se convertissent
+// donc directement en volume réel par simple multiplication.
+const EARTH_HYDROSPHERE_KM3 = 1.386e9;
+const waterVolume = (fractionOfEarth) => {
+  const km3 = fractionOfEarth * EARTH_HYDROSPHERE_KM3;
+  if (km3 >= 1e6) return `${(km3 / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} M km³`;
+  return `${Math.round(km3).toLocaleString("fr-FR")} km³`;
+};
+
 // ---------- panneau ----------
 
 // Crée un curseur ; `onChange` reçoit la valeur numérique.
@@ -41,9 +60,9 @@ const sliders = { fixed: {}, initial: {}, coeffs: {} };
 function buildPanel() {
   const fixedDefs = {
     metals:    { label: "Métaux", min: 0, max: 1, step: 0.01 },
-    water:     { label: "Eau / glace initiale", min: 0, max: 1, step: 0.01 },
+    water:     { label: "H2O initial (eau / glace / vapeur)", min: 0, max: 1, step: 0.01 },
     distance:  { label: "Distance à l'étoile (UA)", min: 0.4, max: 2, step: 0.01 },
-    rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01 },
+    rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01, format: (v) => (v > 0.02 ? `${Math.round(24 / v)} h/jour` : "≥ 1200 h (quasi figée)") },
     volcanism: { label: "Activité volcanique", min: 0, max: 1, step: 0.01 },
   };
   for (const k in fixedDefs) {
@@ -55,7 +74,7 @@ function buildPanel() {
 
   const initDefs = {
     atmosphere: { label: "Densité d'atmosphère", min: 0, max: 2, step: 0.01 },
-    co2:        { label: "Taux de CO2", min: 0, max: 1, step: 0.005 },
+    co2:        { label: "Taux de CO2", min: 0, max: 1, step: 0.005, format: ppm },
     vegetation: { label: "Végétation", min: 0, max: 1, step: 0.01 },
   };
   for (const k in initDefs) {
@@ -217,7 +236,7 @@ function drawPlanet(t) {
   pctx.fillStyle = grad;
   pctx.beginPath(); pctx.arc(cx, cy, outer, 0, Math.PI * 2); pctx.fill();
 
-  renderSurface(d, t * 0.00012);
+  renderSurface(d, t * 0.00012 * (0.05 + 0.95 * state.fixed.rotation)); // vitesse de spin liée à la rotation
   pctx.imageSmoothingEnabled = true;
   pctx.drawImage(surface, cx - R, cy - R, R * 2, R * 2);
 }
@@ -226,7 +245,7 @@ function drawPlanet(t) {
 
 const GAUGES = [
   { key: "atmosphere", label: "Atmosphère", color: "#6ab7ff", max: 2 },
-  { key: "co2", label: "CO2", color: "#ff9a5a", max: 1 },
+  { key: "co2", label: "CO2", color: "#ff9a5a", max: 1, format: ppm },
   { key: "vegetation", label: "Végétation", color: "#6bd96b", max: 1 },
   { key: "haze", label: "Cendres volcaniques", color: "#a99", max: 1 },
 ];
@@ -242,22 +261,89 @@ for (const g of GAUGES) {
 function updateGauges() {
   for (const g of GAUGES) {
     const v = state.sim[g.key];
-    g.value.textContent = v.toFixed(3);
+    g.value.textContent = (g.format || ((x) => x.toFixed(3)))(v);
     g.bar.style.width = `${clampUi(v / g.max) * 100}%`;
   }
 }
 
 function updateStatus() {
   const d = derive(state.fixed, state.sim, state.factories, coeffs);
+  $("year-out").textContent = `an ${state.year}`;
+
+  const rows = [
+    ["Température", `${d.temp.toFixed(0)} °C`],
+    ["Équilibre radiatif", `${d.equilibriumTemp.toFixed(0)} °C`],
+    ["Seuil de surchauffe", `${d.overheat.toFixed(0)} °C`],
+    ["Champ magnétique", `${(d.magnetic * 100).toFixed(0)} %`],
+    ["Océans", waterVolume(d.oceans)],
+    ["Glace", waterVolume(d.ice)],
+    ["Vapeur d'eau", ppm(d.vapor)],
+    ["Albédo", `${(d.albedo * 100).toFixed(0)} %`],
+    ["Vent", d.wind.toFixed(1)],
+    ["Captation CO2 (vivant)", `${(d.co2AbsorbVeg * 100).toFixed(1)} %/an`],
+    ["Captation CO2 (océans)", `${(d.co2AbsorbOcean * 100).toFixed(1)} %/an`],
+  ];
+  $("status").innerHTML = rows.map(([k, v]) => `<div class="info-row"><span>${k}</span><span>${v}</span></div>`).join("");
+
   const flags = [];
   if (d.magnetic < 1) flags.push(d.magnetic === 0 ? "pas de champ magnétique : l'atmosphère se dissipe" : "champ magnétique faible");
   if (d.temp > d.overheat) flags.push("🔥 surchauffe : la végétation s'effondre");
   if (state.sim.atmosphere <= coeffs.atmMinVeg) flags.push("atmosphère trop mince pour la vie");
-  $("status").innerHTML =
-    `<strong>An ${state.year}</strong> · ${d.temp.toFixed(0)} °C (équilibre ${d.equilibriumTemp.toFixed(0)} °C, seuil de surchauffe ${d.overheat.toFixed(0)} °C) · ` +
-    `champ magnétique ${(d.magnetic * 100).toFixed(0)} % · océans ${(d.oceans * 100).toFixed(0)} % · glace ${(d.ice * 100).toFixed(0)} % · ` +
-    `vapeur d'eau ${(d.vapor * 100).toFixed(0)} % · albédo ${(d.albedo * 100).toFixed(0)} % · vent ${d.wind.toFixed(1)}` +
-    (flags.length ? `<br>${flags.join(" · ")}` : "");
+  $("flags").innerHTML = flags.map((f) => `<p class="flag">⚠ ${f}</p>`).join("");
+
+  drawAtmoPie(d);
+}
+
+// ---------- camembert de composition atmosphérique ----------
+
+const atmoPie = $("atmo-pie");
+const apctx = atmoPie.getContext("2d");
+const ATMO_SLICES = [
+  { key: "other", color: "#6ab7ff", label: "Autres (N2/O2…)" },
+  { key: "co2", color: "#ff9a5a", label: "CO2" },
+  { key: "vapor", color: "#8fd0ff", label: "H2O (vapeur)" },
+];
+
+// la taille du camembert code la densité de l'atmosphère, ses parts codent sa composition
+function drawAtmoPie(d) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = atmoPie.clientWidth, h = atmoPie.clientHeight;
+  if (atmoPie.width !== w * dpr || atmoPie.height !== h * dpr) { atmoPie.width = w * dpr; atmoPie.height = h * dpr; }
+  apctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  apctx.clearRect(0, 0, w, h);
+
+  const cx = w / 2, cy = h / 2;
+  const maxR = Math.min(w, h) / 2 - 2;
+  const density = clampUi(state.sim.atmosphere / 1.2);
+  const r = Math.max(4, maxR * density);
+
+  const co2 = state.sim.co2, vapor = d.vapor, other = Math.max(0, 1 - co2 - vapor);
+  const values = { other, co2, vapor };
+  const total = other + co2 + vapor || 1;
+
+  let angle = -Math.PI / 2;
+  for (const sl of ATMO_SLICES) {
+    const frac = values[sl.key] / total;
+    if (frac <= 0) continue;
+    const next = angle + frac * Math.PI * 2;
+    apctx.beginPath();
+    apctx.moveTo(cx, cy);
+    apctx.arc(cx, cy, r, angle, next);
+    apctx.closePath();
+    apctx.fillStyle = sl.color;
+    apctx.fill();
+    angle = next;
+  }
+  apctx.strokeStyle = "rgba(255,255,255,.25)";
+  apctx.lineWidth = 1;
+  apctx.beginPath();
+  apctx.arc(cx, cy, r, 0, Math.PI * 2);
+  apctx.stroke();
+
+  $("atmo-density-out").textContent = `densité ${state.sim.atmosphere.toFixed(2)}`;
+  $("atmo-legend").innerHTML = ATMO_SLICES.map((sl) =>
+    `<div><span class="sw" style="background:${sl.color}"></span>${sl.label} — ${((values[sl.key] / total) * 100).toFixed(1)} %</div>`
+  ).join("");
 }
 
 const chart = $("chart");

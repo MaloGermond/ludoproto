@@ -17,25 +17,25 @@
       <input id="in-speed" type="range" min="1" max="100" step="1" value="20" />
     </label>
 
-    <section>
-      <h2>Archétypes</h2>
+    <details open>
+      <summary>Archétypes</summary>
       <div id="presets" class="presets"></div>
-    </section>
+    </details>
 
-    <section>
-      <h2>Planète <small>(variables fixes)</small></h2>
+    <details open>
+      <summary>Planète <small>(variables fixes)</small></summary>
       <div id="fixed"></div>
-    </section>
+    </details>
 
-    <section>
-      <h2>Joueur</h2>
+    <details open>
+      <summary>Joueur</summary>
       <div id="player"></div>
-    </section>
+    </details>
 
-    <section>
-      <h2>État initial <small>(relance la simulation)</small></h2>
+    <details open>
+      <summary>État initial <small>(relance la simulation)</small></summary>
       <div id="initial"></div>
-    </section>
+    </details>
 
     <details>
       <summary>Seuils et coefficients</summary>
@@ -45,11 +45,21 @@
   </aside>
 
   <main id="stage">
-    <div id="status"></div>
     <canvas id="planet"></canvas>
-    <div id="gauges"></div>
     <canvas id="chart"></canvas>
   </main>
+
+  <aside id="info">
+    <h2>Planète <small id="year-out"></small></h2>
+    <div id="status" class="readout"></div>
+    <div id="flags"></div>
+    <h3>Atmosphère <small id="atmo-density-out"></small></h3>
+    <canvas id="atmo-pie" width="140" height="140"></canvas>
+    <div id="atmo-legend"></div>
+
+    <h3>Composition</h3>
+    <div id="gauges"></div>
+  </aside>
 
   <script src="sim.js"></script>
   <script src="ui.js"></script>
