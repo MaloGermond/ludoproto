@@ -200,10 +200,13 @@ function renderSurface(d, rot) {
   const vegAmount = state.sim.vegetation;
   const hotness = clampUi((d.temp - d.overheat) / 40);
   const cold = clampUi((5 - d.temp) / 30);
-  // calotte polaire visible : même écart pôle-équateur que dans le modèle (lié à la
-  // rotation), pour que sa taille à l'écran corresponde à ce que montre le panneau de
-  // droite, pas seulement à la température globale.
-  const gradient = coeffs.poleGradient * (1 - state.fixed.rotation);
+  // calotte polaire visible : sa taille suit directement le % de glace simulé (donc la
+  // rotation, via les bandes de latitude de sim.js), avec un large dégradé en bord de
+  // calotte plutôt qu'une ligne franche — aire d'une calotte sphérique de demi-angle θ
+  // (les deux pôles) = 1 − cos θ, d'où le bord à |y| = cos θ = 1 − glace.
+  const iceArea = clampUi(d.ice);
+  const capEdge = 1 - iceArea;
+  const FROST_WIDTH = 0.4; // large = dégradé doux et étendu, pas un bord net
   const ash = clampUi(d.groundAsh ?? 0);
   const lx = -0.5, ly = -0.4, lz = 0.76;
   const cr = Math.cos(rot), sr = Math.sin(rot);
@@ -219,9 +222,8 @@ function renderSurface(d, rot) {
       const n = fbm(px, y, pz);
       const m = fbm(px + 40, y + 40, pz + 40);
       // y (axe de rotation) donne directement la latitude, peu importe la rotation
-      const localTemp = d.temp + gradient * (1 - 2 * Math.abs(y));
-      const iceLocal = ramp(coeffs.oceanFreeze - localTemp, 0, coeffs.freezeRange);
-      const frost = Math.max(cold, iceLocal);
+      const iceLocal = smooth(clampUi((Math.abs(y) - (capEdge - FROST_WIDTH / 2)) / FROST_WIDTH));
+      const frost = Math.max(smooth(cold), iceLocal);
       let r, g, b;
       if (n < sea) {
         const depth = clampUi((sea - n) / 0.25);
