@@ -293,10 +293,10 @@ function drawPlanet(t) {
 // ---------- jauges, courbes, statut ----------
 
 const GAUGES = [
-  { key: "atmosphere", label: "Taille de l'atmosphère", color: "#e8e8e8", max: 2 },
-  { key: "co2", label: "CO2", color: "#999", max: 1, format: ppm },
-  { key: "vegetation", label: "Végétation", color: "#bbb", max: 1 },
-  { key: "haze", label: "Cendres volcaniques", color: "#666", max: 1 },
+  { key: "atmosphere", label: "Taille de l'atmosphère", color: "#6ab7ff", max: 2 },
+  { key: "co2", label: "CO2", color: "#ff9a5a", max: 1, format: ppm },
+  { key: "vegetation", label: "Végétation", color: "#6bd96b", max: 1 },
+  { key: "haze", label: "Cendres volcaniques", color: "#a99", max: 1 },
 ];
 for (const g of GAUGES) {
   const el = document.createElement("div");
@@ -355,9 +355,9 @@ function updateStatus() {
 // lisible pour comparer des parts, la taille/densité a déjà sa propre jauge ci-dessous) ----------
 
 const ATMO_SLICES = [
-  { key: "other", color: "#666", label: "Autres (N2/O2… d'origine volcanique)" }, // même teinte que les cendres : même origine
-  { key: "co2", color: "#999", label: "CO2" },
-  { key: "vapor", color: "#e8e8e8", label: "H2O (vapeur)" },
+  { key: "other", color: "#a99", label: "Autres (N2/O2… d'origine volcanique)" }, // même teinte que les cendres : même origine
+  { key: "co2", color: "#ff9a5a", label: "CO2" },
+  { key: "vapor", color: "#8fd0ff", label: "H2O (vapeur)" },
 ];
 
 function updateAtmoComposition(d) {
