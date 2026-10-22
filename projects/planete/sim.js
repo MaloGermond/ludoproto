@@ -21,6 +21,12 @@ const COEFFS = {
   // modèle (réaliste : il vient de la formation de la planète, pas de son dégazage actif).
   volcanicOutput:  { label: "Dégazage volcanique total (tous gaz confondus)", value: 0.08, min: 0, max: 0.1, step: 0.001 },
   volcanicH2OFrac: { label: "Part d'H2O dans le dégazage volcanique", value: 0.75, min: 0, max: 1, step: 0.01 },
+  // contrairement au CO2/cendres (limités par la place disponible dans l'atmosphère),
+  // rien ne freinait l'eau — elle finissait toujours par couvrir toute la planète, même
+  // un monde voulu sec. En vrai, remplir des océans par dégazage prend des centaines de
+  // millions d'années, bien plus lentement que l'équilibrage de l'atmosphère : ce taux
+  // ralentit l'eau spécifiquement, indépendamment de volcanicOutput.
+  waterOutgasRate: { label: "Vitesse à laquelle l'H2O volcanique devient de l'eau de surface", value: 0.06, min: 0, max: 1, step: 0.01 },
   volcanicCO2Frac: { label: "Part de CO2 dans le dégazage volcanique", value: 0.15, min: 0, max: 1, step: 0.01 },
   factoryCo2:      { label: "CO2 émis par usine / an", value: 0.0005, min: 0, max: 0.005, step: 0.0001 },
   vegAbsorb:       { label: "Absorption du CO2 par la végétation", value: 0.05, min: 0, max: 0.2, step: 0.001 },
@@ -110,8 +116,8 @@ const MISSIONS = {
   iceball: {
     label: "Boule de glace",
     brief: "Cette planète (1,13 UA de son étoile, rotation rapide) est prise dans les glaces : sans eau liquide, la végétation plafonne à une petite frange désertique et n'ira jamais plus loin. Ajoute des usines pour produire du CO2, réchauffer suffisamment pour faire fondre la glace — mais pas trop, sous peine de rebasculer dans l'autre excès.",
-    fixed: { metals: 0.8, distance: 1.11, rotation: 0.9, volcanism: 0.15 },
-    dynamic: { size: 0.7, water: 0.6, co2: 0.02, vegetation: 0.02 },
+    fixed: { metals: 0.8, distance: 1.12, rotation: 0.9, volcanism: 0.15 },
+    dynamic: { size: 0.68, water: 0.6, co2: 0.02, vegetation: 0.02 },
     factories: 0,
     goal: { label: "Végétation > 50 %", check: (s) => s.vegetation > 0.5 },
   },
@@ -274,7 +280,7 @@ function step(fixed, s, factories, c) {
   const volcCO2 = clamp(c.volcanicCO2Frac, 0, 1 - volcH2O);
   const volcAsh = clamp(1 - volcH2O - volcCO2);
   const room = clamp(1 - d.atmFill);
-  water = clamp(water + volcTotal * volcH2O * d.magnetic * (1 - water), 0, 1);
+  water = clamp(water + volcTotal * volcH2O * c.waterOutgasRate * d.magnetic * (1 - water), 0, 1);
 
   // CO2 : usines + volcans, absorbé par végétation et océans, emporté avec l'atmosphère
   co2 += (factories * c.factoryCo2 + volcTotal * volcCO2 * d.magnetic) * room;
