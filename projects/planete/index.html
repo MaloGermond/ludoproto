@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>planète — simulateur d'évolution</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside id="panel">
+    <div class="toolbar">
+      <button id="btn-play" class="primary" type="button">⏸ Pause</button>
+      <button id="btn-reset" type="button">↺ Recommencer</button>
+    </div>
+    <label id="speed-field" title="Années simulées par seconde">
+      <output id="speed-out">10 ans/s</output>
+      <input id="in-speed" type="range" min="1" max="100" step="1" value="10" />
+    </label>
+
+    <details open>
+      <summary>Missions</summary>
+      <div id="missions" class="presets"></div>
+    </details>
+
+    <details open>
+      <summary>Archétypes</summary>
+      <div id="presets" class="presets"></div>
+    </details>
+
+    <details open>
+      <summary>Planète <small>(variables fixes)</small></summary>
+      <div id="fixed"></div>
+    </details>
+
+    <details open>
+      <summary>Joueur</summary>
+      <div id="player"></div>
+    </details>
+
+    <details open>
+      <summary>État initial <small>(relance la simulation)</small></summary>
+      <div id="initial"></div>
+    </details>
+
+    <details>
+      <summary>Seuils et coefficients</summary>
+      <div id="coeffs"></div>
+      <button id="btn-coeffs-reset" type="button">Valeurs par défaut</button>
+    </details>
+  </aside>
+
+  <main id="stage">
+    <canvas id="planet"></canvas>
+    <canvas id="chart"></canvas>
+  </main>
+
+  <aside id="info">
+    <h2>Planète <small id="year-out"></small></h2>
+    <div id="mission-status"></div>
+    <div id="status" class="readout"></div>
+    <div id="flags"></div>
+    <h3>Composition de l'atmosphère</h3>
+    <div id="atmo-composition"></div>
+    <div id="gauges"></div>
+  </aside>
+
+  <script src="sim.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
