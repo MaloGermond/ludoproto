@@ -208,6 +208,7 @@ function renderSurface(d, rot) {
   const capEdge = 1 - iceArea;
   const FROST_WIDTH = 0.4; // large = dégradé doux et étendu, pas un bord net
   const ash = clampUi(d.groundAsh ?? 0);
+  const haze = clampUi(state.sim.haze);
   const lx = -0.5, ly = -0.4, lz = 0.76;
   const cr = Math.cos(rot), sr = Math.sin(rot);
   for (let j = 0; j < PLANET_RES; j++) {
@@ -243,8 +244,18 @@ function renderSurface(d, rot) {
       }
       // calotte de glace (pôle ou planète entière si assez froide), par-dessus mer/terre
       r = mix(r, 235, frost); g = mix(g, 240, frost); b = mix(b, 250, frost);
-      // cendres volcaniques déposées au sol : noircissent, sauf sous la glace
-      r = mix(r, 25, ash * (1 - frost)); g = mix(g, 22, ash * (1 - frost)); b = mix(b, 20, ash * (1 - frost));
+      // cendres volcaniques déposées au sol : gris clair (pas noir — les cendres réelles sont
+      // claires), sauf sous la glace
+      r = mix(r, 165, ash * (1 - frost)); g = mix(g, 160, ash * (1 - frost)); b = mix(b, 155, ash * (1 - frost));
+      // nuage de cendres en suspension : texture de bruit indépendante (dérive un peu plus
+      // vite que le sol), couverture et opacité qui montent avec le niveau de cendres —
+      // jamais totalement opaque, pour garder l'impression de nuage plutôt que de peinture.
+      if (haze > 0.02) {
+        const cloud = 0.5 * fbm(px * 1.7 + 5, y * 1.7 + 5, pz * 1.7 + 5) + 0.5 * fbm(px * 3.4 - rot * 0.4, y * 3.4, pz * 3.4 - rot * 0.4);
+        const coverage = smooth(clampUi((cloud - (1 - haze)) / 0.35));
+        const cloudOpacity = coverage * clampUi(haze * 1.3) * 0.85;
+        r = mix(r, 185, cloudOpacity); g = mix(g, 182, cloudOpacity); b = mix(b, 178, cloudOpacity);
+      }
       const light = 0.25 + 0.75 * Math.max(0, x * lx + y * ly + z * lz);
       data[o] = r * light; data[o + 1] = g * light; data[o + 2] = b * light; data[o + 3] = 255;
     }
@@ -355,18 +366,23 @@ function updateStatus() {
 // lisible pour comparer des parts, la taille/densité a déjà sa propre jauge ci-dessous) ----------
 
 const ATMO_SLICES = [
-  { key: "other", color: "#a99", label: "Autres (N2/O2… d'origine volcanique)" }, // même teinte que les cendres : même origine
   { key: "co2", color: "#ff9a5a", label: "CO2" },
   { key: "vapor", color: "#8fd0ff", label: "H2O (vapeur)" },
+  { key: "haze", color: "#a99", label: "Cendres volcaniques" }, // même teinte que la jauge « Cendres »
 ];
+const NOTABLE_MIN = 0.01; // rien d'affiché si tout ça reste sous ce seuil (juste « autres » à 100 %, pas informatif)
 
 function updateAtmoComposition(d) {
-  const co2 = state.sim.co2, vapor = d.vapor, other = Math.max(0, 1 - co2 - vapor);
-  const values = { other, co2, vapor };
-  const total = other + co2 + vapor || 1;
+  const co2 = state.sim.co2, vapor = d.vapor, haze = state.sim.haze;
+  const notable = co2 + vapor + haze;
+  if (notable < NOTABLE_MIN) { $("atmo-composition").innerHTML = ""; return; }
+  const other = Math.max(0, 1 - notable);
+  const values = { other, co2, vapor, haze };
+  const total = other + notable || 1;
+  const slices = [{ key: "other", color: "#555", label: "Autres (N2/O2…)" }, ...ATMO_SLICES];
   $("atmo-composition").innerHTML =
-    `<div class="comp-bar">${ATMO_SLICES.map((sl) => `<i style="width:${(values[sl.key] / total) * 100}%;background:${sl.color}"></i>`).join("")}</div>` +
-    `<div class="comp-legend">${ATMO_SLICES.map((sl) =>
+    `<div class="comp-bar">${slices.map((sl) => `<i style="width:${(values[sl.key] / total) * 100}%;background:${sl.color}"></i>`).join("")}</div>` +
+    `<div class="comp-legend">${slices.map((sl) =>
       `<span><i class="sw" style="background:${sl.color}"></i>${sl.label} ${((values[sl.key] / total) * 100).toFixed(0)}%</span>`
     ).join("")}</div>`;
 }

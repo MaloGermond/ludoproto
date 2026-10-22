@@ -36,15 +36,15 @@ const COEFFS = {
   albedoIce:         { label: "Albédo supplémentaire de la glace", value: 0.5, min: 0, max: 0.9, step: 0.01 },
   albedoOcean:       { label: "Albédo en moins des océans (sombres)", value: 0.15, min: 0, max: 0.5, step: 0.01 },
   albedoVeg:         { label: "Albédo en moins de la végétation (sombre)", value: 0.05, min: 0, max: 0.3, step: 0.01 },
-  albedoAsh:         { label: "Albédo en moins des cendres au sol (sombres)", value: 0.1, min: 0, max: 0.3, step: 0.01 },
+  albedoAsh:         { label: "Albédo en plus des cendres au sol (gris clair)", value: 0.15, min: 0, max: 0.4, step: 0.01 },
+  albedoHaze:        { label: "Albédo en plus du nuage de cendres (passé 50 % d'opacité)", value: 0.25, min: 0, max: 0.5, step: 0.01 },
   albedoSensitivity: { label: "Sensibilité de la température à l'albédo (°C)", value: 40, min: 0, max: 100, step: 1 },
 
   ashRate:    { label: "Production de cendres volcaniques", value: 0.05, min: 0, max: 0.3, step: 0.005 },
   ashDecay:   { label: "Vitesse de retombée des cendres", value: 0.03, min: 0, max: 0.3, step: 0.005 },
-  ashCooling: { label: "Refroidissement dû aux cendres (°C × opacité)", value: 25, min: 0, max: 60, step: 1 },
   ashRainout: { label: "Lessivage des cendres par la pluie (océans + vapeur)", value: 1, min: 0, max: 5, step: 0.1 },
-  ashDeposit:    { label: "Part des cendres qui se dépose au sol en retombant", value: 0.5, min: 0, max: 1, step: 0.01 },
-  ashWeathering: { label: "Vitesse à laquelle les cendres au sol s'effacent", value: 0.01, min: 0, max: 0.1, step: 0.001 },
+  ashDeposit:    { label: "Part des cendres qui se dépose au sol en retombant", value: 0.3, min: 0, max: 1, step: 0.01 },
+  ashWeathering: { label: "Vitesse à laquelle les cendres au sol s'effacent", value: 0.02, min: 0, max: 0.1, step: 0.001 },
 
   climateEase:     { label: "Vitesse de retour à l'équilibre climatique", value: 0.25, min: 0.02, max: 1, step: 0.01 },
   oceanDamping:    { label: "Inertie thermique des océans (ralentit le climat)", value: 0.2, min: 0, max: 0.9, step: 0.01 },
@@ -181,16 +181,19 @@ function derive(fixed, s, factories, c) {
   const vapor = s.water * clamp(vaporByTemp + potentialLiquid * (1 - pressureFrac));
 
   const transparency = clamp(1 - s.haze);
-  // albédo : glace (clair, réfléchit) monte, océans et végétation (sombres, absorbent) baissent.
-  const albedo = clamp(c.albedoBase + c.albedoIce * ice - c.albedoOcean * oceans - c.albedoVeg * s.vegetation - c.albedoAsh * s.groundAsh, 0.05, 0.9);
+  // albédo : glace et cendres au sol (claires, réfléchissent) montent, océans et végétation
+  // (sombres, absorbent) baissent. Le nuage de cendres en suspension ne compte que passé
+  // 50 % d'opacité (sinon trop fin pour changer la réflectivité globale) — c'est cette
+  // composition de l'atmosphère qui pèse sur l'albédo, pas un refroidissement déconnecté.
+  const hazeAlbedo = c.albedoHaze * ramp(s.haze, 0.5, 0.5);
+  const albedo = clamp(c.albedoBase + c.albedoIce * ice + c.albedoAsh * s.groundAsh + hazeAlbedo - c.albedoOcean * oceans - c.albedoVeg * s.vegetation, 0.05, 0.9);
 
   // température d'équilibre : insolation ajustée par l'albédo, plus les effets de serre
-  // (atmosphère/CO2, vapeur d'eau) et le refroidissement par les cendres volcaniques.
+  // (atmosphère/CO2, vapeur d'eau).
   const equilibriumTemp = baseTemp
     + c.albedoSensitivity * (c.albedoBase - albedo)
     + s.atmosphere * (c.naturalGreen + c.greenhouse * s.co2)
-    + c.vaporGreenhouse * vapor
-    - c.ashCooling * s.haze;
+    + c.vaporGreenhouse * vapor;
 
   const overheat = c.overheatRef * (1 - c.overheatDist + c.overheatDist * fixed.distance);
   // la végétation (terrestre + marine) est plafonnée par la couverture d'océan actuelle,
@@ -275,8 +278,8 @@ function step(fixed, s, factories, c) {
   // fait pousser plus vite (fertilisation) jusqu'à un seuil au-delà duquel il devient
   // toxique. S'effondre aussi en cas de surchauffe. Les cendres volcaniques en
   // suspension bloquent une partie de la lumière (et retombent sur les feuilles),
-  // ce qui ralentit directement la croissance (en plus du refroidissement qu'elles
-  // provoquent déjà sur le climat via `ashCooling`).
+  // ce qui ralentit directement la croissance (en plus de l'effet sur l'albédo/climat
+  // une fois le nuage assez épais, voir `albedoHaze` dans `derive`).
   const lifeOk = atmosphere > c.atmMinVeg && d.temp < d.overheat;
   if (lifeOk) {
     const co2Fert = clamp(co2 / c.co2Optimal);
