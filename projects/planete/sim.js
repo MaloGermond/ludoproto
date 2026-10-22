@@ -24,8 +24,6 @@ const COEFFS = {
 
   oceanFreeze:       { label: "Température de gel des océans (°C)", value: 0, min: -30, max: 30, step: 1 },
   freezeRange:       { label: "Plage de gel progressif des océans (°C)", value: 15, min: 1, max: 40, step: 1 },
-  oceanBoil:         { label: "Température d'ébullition des océans (°C)", value: 100, min: 50, max: 150, step: 1 },
-  boilRange:         { label: "Plage d'ébullition progressive des océans (°C)", value: 20, min: 1, max: 40, step: 1 },
   minPressureLiquid: { label: "Pression minimale pour l'eau liquide", value: 0.12, min: 0, max: 0.8, step: 0.01 },
   waterEscape:       { label: "Fuite irréversible d'H2O vers l'espace (sans pression)", value: 0.01, min: 0, max: 0.1, step: 0.001 },
 
@@ -172,13 +170,15 @@ function derive(fixed, s, factories, c) {
     ice += b.w * s.water * ramp(c.oceanFreeze - localTemp, 0, c.freezeRange);
   }
   const iceFrac = s.water > 0 ? ice / s.water : 0;
-  const boilFrac = ramp(temp - c.oceanBoil, 0, c.boilRange);
-  // sans assez de pression, l'eau liquide bout/sublime tout de suite (comme sur Mars) —
-  // mais la glace et la vapeur, elles, persistent : ce n'est que le stock total (`water`)
-  // qui s'échappe peu à peu vers l'espace (voir step()), pas un interrupteur instantané.
-  const pressureOk = s.atmosphere >= c.minPressureLiquid ? 1 : 0;
-  const oceans = s.water * clamp(1 - iceFrac - boilFrac) * pressureOk;
-  const vapor = s.water * ramp(temp - c.vaporStart, 0, c.vaporRange);
+  // l'eau liquide a aussi besoin d'une pression suffisante (sinon elle bout/s'évapore,
+  // comme sur Mars, même à température modérée) — mais ça ne la fait pas disparaître
+  // d'un coup : ce qui ne peut pas rester liquide bascule en vapeur (ou reste gelé si
+  // c'est déjà de la glace), proportionnellement et progressivement, pas par interrupteur.
+  const pressureFrac = ramp(s.atmosphere, 0, c.minPressureLiquid);
+  const vaporByTemp = ramp(temp - c.vaporStart, 0, c.vaporRange);
+  const potentialLiquid = clamp(1 - iceFrac - vaporByTemp);
+  const oceans = s.water * potentialLiquid * pressureFrac;
+  const vapor = s.water * clamp(vaporByTemp + potentialLiquid * (1 - pressureFrac));
 
   const transparency = clamp(1 - s.haze);
   // albédo : glace (clair, réfléchit) monte, océans et végétation (sombres, absorbent) baissent.
@@ -209,7 +209,7 @@ function derive(fixed, s, factories, c) {
   const co2AbsorbVeg = c.vegAbsorb * s.vegetation;
   const co2AbsorbOcean = c.oceanAbsorb * oceans * bioPresence;
 
-  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, pressureOk, transparency, albedo, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean };
+  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, pressureFrac, transparency, albedo, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean };
 }
 
 // Avance l'état d'un an. Retourne le nouvel état (l'ancien n'est pas modifié).
@@ -222,10 +222,8 @@ function step(fixed, s, factories, c) {
   // l'espace, de façon irréversible — mais la glace polaire, elle, est protégée (comme sur
   // Mars, qui garde sa glace malgré 4 milliards d'années d'atmosphère quasi nulle) : si une
   // atmosphère se reconstitue plus tard, cette glace redevient une vraie source d'eau.
-  if (!d.pressureOk) {
-    const iceFrac = water > 0 ? d.ice / water : 0;
-    water = Math.max(0, water - c.waterEscape * water * (1 - iceFrac));
-  }
+  const iceFrac = water > 0 ? d.ice / water : 0;
+  water = Math.max(0, water - c.waterEscape * water * (1 - iceFrac) * (1 - d.pressureFrac));
 
   // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme),
   // et vapeur d'eau qui la rejoint quand les océans chauffent et s'évaporent — boucle

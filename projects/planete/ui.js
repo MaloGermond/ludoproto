@@ -293,7 +293,7 @@ function drawPlanet(t) {
 // ---------- jauges, courbes, statut ----------
 
 const GAUGES = [
-  { key: "atmosphere", label: "Atmosphère", color: "#6ab7ff", max: 2 },
+  { key: "atmosphere", label: "Taille de l'atmosphère", color: "#6ab7ff", max: 2 },
   { key: "co2", label: "CO2", color: "#ff9a5a", max: 1, format: ppm },
   { key: "vegetation", label: "Végétation", color: "#6bd96b", max: 1 },
   { key: "haze", label: "Cendres volcaniques", color: "#a99", max: 1 },
@@ -331,8 +331,6 @@ function updateStatus() {
 
   const rows = [
     ["Température", `${d.temp.toFixed(0)} °C`],
-    ["Équilibre radiatif", `${d.equilibriumTemp.toFixed(0)} °C`],
-    ["Seuil de surchauffe", `${d.overheat.toFixed(0)} °C`],
     ["Champ magnétique", `${(d.magnetic * 100).toFixed(0)} %`],
     ["Eau totale (H2O)", waterVolume(state.sim.water)],
     ["Océans", waterVolume(d.oceans)],
@@ -350,59 +348,27 @@ function updateStatus() {
   if (state.sim.atmosphere <= coeffs.atmMinVeg) flags.push("atmosphère trop mince pour la vie");
   $("flags").innerHTML = flags.map((f) => `<p class="flag">⚠ ${f}</p>`).join("");
 
-  drawAtmoPie(d);
+  updateAtmoComposition(d);
 }
 
-// ---------- camembert de composition atmosphérique ----------
+// ---------- composition de l'atmosphère (une barre segmentée, pas un camembert : plus
+// lisible pour comparer des parts, la taille/densité a déjà sa propre jauge ci-dessous) ----------
 
-const atmoPie = $("atmo-pie");
-const apctx = atmoPie.getContext("2d");
 const ATMO_SLICES = [
   { key: "other", color: "#6ab7ff", label: "Autres (N2/O2…)" },
   { key: "co2", color: "#ff9a5a", label: "CO2" },
   { key: "vapor", color: "#8fd0ff", label: "H2O (vapeur)" },
 ];
 
-// la taille du camembert code la densité de l'atmosphère, ses parts codent sa composition
-function drawAtmoPie(d) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = atmoPie.clientWidth, h = atmoPie.clientHeight;
-  if (atmoPie.width !== w * dpr || atmoPie.height !== h * dpr) { atmoPie.width = w * dpr; atmoPie.height = h * dpr; }
-  apctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  apctx.clearRect(0, 0, w, h);
-
-  const cx = w / 2, cy = h / 2;
-  const maxR = Math.min(w, h) / 2 - 2;
-  const density = clampUi(state.sim.atmosphere / 1.2);
-  const r = Math.max(4, maxR * density);
-
+function updateAtmoComposition(d) {
   const co2 = state.sim.co2, vapor = d.vapor, other = Math.max(0, 1 - co2 - vapor);
   const values = { other, co2, vapor };
   const total = other + co2 + vapor || 1;
-
-  let angle = -Math.PI / 2;
-  for (const sl of ATMO_SLICES) {
-    const frac = values[sl.key] / total;
-    if (frac <= 0) continue;
-    const next = angle + frac * Math.PI * 2;
-    apctx.beginPath();
-    apctx.moveTo(cx, cy);
-    apctx.arc(cx, cy, r, angle, next);
-    apctx.closePath();
-    apctx.fillStyle = sl.color;
-    apctx.fill();
-    angle = next;
-  }
-  apctx.strokeStyle = "rgba(255,255,255,.25)";
-  apctx.lineWidth = 1;
-  apctx.beginPath();
-  apctx.arc(cx, cy, r, 0, Math.PI * 2);
-  apctx.stroke();
-
-  $("atmo-density-out").textContent = `densité ${state.sim.atmosphere.toFixed(2)}`;
-  $("atmo-legend").innerHTML = ATMO_SLICES.map((sl) =>
-    `<div><span class="sw" style="background:${sl.color}"></span>${sl.label} — ${((values[sl.key] / total) * 100).toFixed(1)} %</div>`
-  ).join("");
+  $("atmo-composition").innerHTML =
+    `<div class="comp-bar">${ATMO_SLICES.map((sl) => `<i style="width:${(values[sl.key] / total) * 100}%;background:${sl.color}"></i>`).join("")}</div>` +
+    `<div class="comp-legend">${ATMO_SLICES.map((sl) =>
+      `<span><i class="sw" style="background:${sl.color}"></i>${sl.label} ${((values[sl.key] / total) * 100).toFixed(0)}%</span>`
+    ).join("")}</div>`;
 }
 
 const chart = $("chart");
