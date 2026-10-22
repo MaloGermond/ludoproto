@@ -65,7 +65,9 @@ function buildPanel() {
     // 0.5 (valeur « terrestre » par défaut ailleurs dans le modèle) = 24 h/jour ; au-delà,
     // on va plus vite que la Terre (jusqu'à ~12 h/jour à fond, proche de Jupiter/Saturne).
     rotation:  { label: "Vitesse de rotation", min: 0, max: 1, step: 0.01, format: (v) => (v > 0.01 ? `${Math.round(12 / v)} h/jour` : "≥ 1200 h (quasi figée)") },
-    volcanism: { label: "Activité volcanique", min: 0, max: 1, step: 0.01 },
+    // 1 = activité volcanique terrestre actuelle ; au-delà, un monde plus volcanique
+    // que la Terre aujourd'hui (jusqu'à 5×, proche de la Terre primitive/l'Io actuel).
+    volcanism: { label: "Activité volcanique", min: 0, max: 5, step: 0.05, format: (v) => `${v.toFixed(2)}× Terre` },
   };
   for (const k in fixedDefs) {
     sliders.fixed[k] = addSlider($("fixed"), { ...fixedDefs[k], value: state.fixed[k] }, (v) => { state.fixed[k] = v; });
@@ -247,6 +249,17 @@ function renderSurface(d, rot) {
       // cendres volcaniques déposées au sol : gris clair (pas noir — les cendres réelles sont
       // claires), sauf sous la glace
       r = mix(r, 165, ash * (1 - frost)); g = mix(g, 160, ash * (1 - frost)); b = mix(b, 155, ash * (1 - frost));
+      // points volcaniques incandescents : quelques taches fixes sur la terre (bruit à
+      // haute fréquence, indépendant du reste), plus nombreuses/intenses avec l'activité
+      // volcanique — percent légèrement sous la glace, par-dessus le reste.
+      if (n >= sea && frost < 0.9) {
+        const volcIntensity = clampUi(fixed.volcanism / 2);
+        if (volcIntensity > 0.02) {
+          const spot = fbm(px * 9 + 300, y * 9 + 300, pz * 9 + 300);
+          const glow = smooth(clampUi((spot - (0.78 - 0.22 * volcIntensity)) / 0.05)) * (1 - frost * 0.7);
+          if (glow > 0) { r = mix(r, 255, glow); g = mix(g, 140, glow); b = mix(b, 30, glow); }
+        }
+      }
       // nuage de cendres en suspension : texture de bruit indépendante, qui dérive selon le
       // vent de la planète (pas la rotation du sol) ; à cendres=1, couverture ~moitié de la
       // planète et léger (opacité plafonnée basse) — un voile, pas une chape.

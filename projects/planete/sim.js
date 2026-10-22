@@ -26,7 +26,7 @@ const COEFFS = {
   // un monde voulu sec. En vrai, remplir des océans par dégazage prend des centaines de
   // millions d'années, bien plus lentement que l'équilibrage de l'atmosphère : ce taux
   // ralentit l'eau spécifiquement, indépendamment de volcanicOutput.
-  waterOutgasRate: { label: "Vitesse à laquelle l'H2O volcanique devient de l'eau de surface", value: 0.06, min: 0, max: 1, step: 0.01 },
+  waterOutgasRate: { label: "Vitesse à laquelle l'H2O volcanique devient de l'eau de surface", value: 0.15, min: 0, max: 1, step: 0.01 },
   volcanicCO2Frac: { label: "Part de CO2 dans le dégazage volcanique", value: 0.15, min: 0, max: 1, step: 0.01 },
   factoryCo2:      { label: "CO2 émis par usine / an", value: 0.0005, min: 0, max: 0.005, step: 0.0001 },
   vegAbsorb:       { label: "Absorption du CO2 par la végétation", value: 0.05, min: 0, max: 0.2, step: 0.001 },
@@ -280,7 +280,10 @@ function step(fixed, s, factories, c) {
   const volcCO2 = clamp(c.volcanicCO2Frac, 0, 1 - volcH2O);
   const volcAsh = clamp(1 - volcH2O - volcCO2);
   const room = clamp(1 - d.atmFill);
-  water = clamp(water + volcTotal * volcH2O * c.waterOutgasRate * d.magnetic * (1 - water), 0, 1);
+  // (1-water)² plutôt que (1-water) : un monde qui manque vraiment d'eau en gagne
+  // nettement, un monde déjà bien pourvu plafonne au lieu de continuer à grimper
+  // doucement vers 100 % indéfiniment.
+  water = clamp(water + volcTotal * volcH2O * c.waterOutgasRate * d.magnetic * (1 - water) ** 2, 0, 1);
 
   // CO2 : usines + volcans, absorbé par végétation et océans, emporté avec l'atmosphère
   co2 += (factories * c.factoryCo2 + volcTotal * volcCO2 * d.magnetic) * room;
