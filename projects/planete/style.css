@@ -1,9 +1,9 @@
 :root {
-  --bg: #05070f;
-  --panel: #0d1222;
-  --line: rgba(255, 255, 255, 0.15);
-  --text: #e8ecf5;
-  --muted: rgba(232, 236, 245, 0.6);
+  --bg: #000000;
+  --panel: #141414;
+  --line: rgba(255, 255, 255, 0.18);
+  --text: #f5f5f5;
+  --muted: rgba(245, 245, 245, 0.55);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px system-ui, sans-serif; }
@@ -25,8 +25,9 @@ button, select {
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer;
 }
 button:hover { background: rgba(255, 255, 255, 0.16); }
-button.primary { background: rgba(130, 255, 170, 0.2); border-color: rgba(130, 255, 170, 0.5); }
-button.active { background: rgba(110, 190, 255, 0.3); border-color: rgba(110, 190, 255, 0.7); }
+button.primary { background: #fff; color: #000; border-color: #fff; font-weight: 600; }
+button.primary:hover { background: #ddd; }
+button.active { background: rgba(255, 255, 255, 0.22); border-color: #fff; }
 select option { background: var(--panel); }
 
 .field { display: block; margin-top: 10px; }
@@ -49,13 +50,13 @@ details button { margin-top: 12px; }
 #info h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: normal; }
 .mission-box { padding: 8px 10px; margin-bottom: 10px; border-radius: 6px; font-size: 12px; line-height: 1.4; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); }
 .mission-box .goal { margin-top: 6px; font-weight: 600; }
-.mission-box.won { background: rgba(130, 255, 170, 0.12); border-color: rgba(130, 255, 170, 0.5); }
-.mission-box.won .goal { color: #8cffb0; }
+.mission-box.won { background: rgba(255, 255, 255, 0.1); border-color: #fff; }
+.mission-box.won .goal { color: #fff; }
 #info h3 { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .info-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
 .info-row span:first-child { color: var(--muted); }
 .info-row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
-.flag { margin: 6px 0 0; padding: 6px 8px; background: rgba(255, 154, 138, 0.12); border: 1px solid rgba(255, 154, 138, 0.35); border-radius: 6px; color: #ff9a8a; font-size: 12px; }
+.flag { margin: 6px 0 0; padding: 6px 8px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 6px; color: var(--text); font-size: 12px; }
 #info #gauges { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
 .comp-bar { display: flex; height: 10px; border-radius: 4px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
 .comp-bar i { display: block; height: 100%; }

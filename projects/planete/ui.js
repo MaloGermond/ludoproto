@@ -293,10 +293,10 @@ function drawPlanet(t) {
 // ---------- jauges, courbes, statut ----------
 
 const GAUGES = [
-  { key: "atmosphere", label: "Taille de l'atmosphère", color: "#6ab7ff", max: 2 },
-  { key: "co2", label: "CO2", color: "#ff9a5a", max: 1, format: ppm },
-  { key: "vegetation", label: "Végétation", color: "#6bd96b", max: 1 },
-  { key: "haze", label: "Cendres volcaniques", color: "#a99", max: 1 },
+  { key: "atmosphere", label: "Taille de l'atmosphère", color: "#e8e8e8", max: 2 },
+  { key: "co2", label: "CO2", color: "#999", max: 1, format: ppm },
+  { key: "vegetation", label: "Végétation", color: "#bbb", max: 1 },
+  { key: "haze", label: "Cendres volcaniques", color: "#666", max: 1 },
 ];
 for (const g of GAUGES) {
   const el = document.createElement("div");
@@ -355,9 +355,9 @@ function updateStatus() {
 // lisible pour comparer des parts, la taille/densité a déjà sa propre jauge ci-dessous) ----------
 
 const ATMO_SLICES = [
-  { key: "other", color: "#6ab7ff", label: "Autres (N2/O2…)" },
-  { key: "co2", color: "#ff9a5a", label: "CO2" },
-  { key: "vapor", color: "#8fd0ff", label: "H2O (vapeur)" },
+  { key: "other", color: "#666", label: "Autres (N2/O2… d'origine volcanique)" }, // même teinte que les cendres : même origine
+  { key: "co2", color: "#999", label: "CO2" },
+  { key: "vapor", color: "#e8e8e8", label: "H2O (vapeur)" },
 ];
 
 function updateAtmoComposition(d) {
@@ -388,11 +388,13 @@ function drawChart() {
   if (hist.length < 2) return;
 
   const xAt = (i) => pad.l + (i / (HISTORY_MAX - 1)) * pw;
+  // seule partie non monochrome de l'UI : la couleur distingue les séries, c'est ce qui
+  // rend ce graphique lisible rapidement.
   const series = [
-    { key: "atmosphere", color: "#6ab7ff", scale: (v) => v / 2 },
-    { key: "co2", color: "#ff9a5a", scale: (v) => v },
-    { key: "vegetation", color: "#6bd96b", scale: (v) => v },
-    { key: "temp", color: "#ff6a6a", scale: (v) => (v + 50) / 250, dash: [4, 3] }, // −50…200 °C
+    { key: "atmosphere", name: "atmosphère", color: "#6ab7ff", scale: (v) => v / 2 },
+    { key: "co2", name: "CO2", color: "#ff9a5a", scale: (v) => v },
+    { key: "vegetation", name: "végétation", color: "#6bd96b", scale: (v) => v },
+    { key: "temp", name: "température", color: "#ff6a6a", scale: (v) => (v + 50) / 250, dash: [4, 3] }, // −50…200 °C
   ];
   const first = state.year - hist.length + 1;
   for (const s of series) {
@@ -417,7 +419,7 @@ function drawChart() {
   cctx.setLineDash([]);
 
   cctx.font = "11px system-ui, sans-serif";
-  cctx.fillStyle = "rgba(232,236,245,0.6)";
+  cctx.fillStyle = "rgba(245,245,245,0.6)";
   cctx.fillText(`an ${first}`, pad.l, h - 5);
   cctx.textAlign = "right";
   cctx.fillText(`an ${state.year}`, pad.l + pw, h - 5);
@@ -425,7 +427,7 @@ function drawChart() {
   cctx.fillText("seuil", w - 4, yOver + 4);
   cctx.textAlign = "left";
   let lx = pad.l + 6;
-  for (const s of [...series].map((s, i) => ({ ...s, name: ["atmosphère", "CO2", "végétation", "température"][i] }))) {
+  for (const s of series) {
     cctx.fillStyle = s.color;
     cctx.fillText(s.name, lx, pad.t + 14);
     lx += cctx.measureText(s.name).width + 14;

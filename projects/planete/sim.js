@@ -27,8 +27,8 @@ const COEFFS = {
   minPressureLiquid: { label: "Pression minimale pour l'eau liquide", value: 0.12, min: 0, max: 0.8, step: 0.01 },
   waterEscape:       { label: "Fuite irréversible d'H2O vers l'espace (sans pression)", value: 0.01, min: 0, max: 0.1, step: 0.001 },
 
-  vaporStart:      { label: "Température de départ de l'évaporation (°C)", value: -10, min: -40, max: 60, step: 1 },
-  vaporRange:      { label: "Plage de saturation de la vapeur d'eau (°C)", value: 60, min: 5, max: 120, step: 1 },
+  vaporStart:      { label: "Température de départ de l'évaporation (°C)", value: 20, min: -40, max: 60, step: 1 },
+  vaporRange:      { label: "Plage de saturation de la vapeur d'eau (°C)", value: 80, min: 5, max: 120, step: 1 },
   vaporGreenhouse: { label: "Effet de serre de la vapeur d'eau (°C × vapeur)", value: 25, min: 0, max: 80, step: 1 },
   vaporToAtm:      { label: "Vapeur d'eau rejoignant l'atmosphère (évaporation)", value: 0.01, min: 0, max: 0.05, step: 0.001 },
 

@@ -19,7 +19,9 @@ npm run sim     # trajectoire des 7 archétypes en console
 - **CO2** : capté chaque année par le vivant terrestre (`co2AbsorbVeg`) et par le phytoplancton océanique (`co2AbsorbOcean`). Les deux sont proportionnels à la végétation et retombent à 0 si elle s'effondre — dans ce modèle, c'est la biosphère qui régule le CO2, pas l'eau en elle-même.
 - **Joueur** : nombre d'usines (émettent du CO2).
 - **Seuils et coefficients** : tous dans `COEFFS` (`sim.js`), éditables en direct dans le panneau.
-- **Unités du panneau de droite** : CO2 en ppm (gaz trace), océans/glace/eau totale en km³ réels (échelle calibrée sur l'hydrosphère terrestre via le H2O initial), rotation en heures/jour, et une barre de composition atmosphérique (CO2 / H2O vapeur / autres gaz) à côté de la jauge de taille de l'atmosphère.
+- **Unités du panneau de droite** : CO2 en ppm (gaz trace), océans/glace/eau totale en km³ réels (échelle calibrée sur l'hydrosphère terrestre via le H2O initial), rotation en heures/jour, et une barre de composition atmosphérique (CO2 / H2O vapeur / autres gaz, ces derniers d'origine volcanique — même teinte que les cendres) à côté de la jauge de taille de l'atmosphère.
+- **H2O = taux de couverture** : 1 = planète entièrement recouverte d'eau (liquide, glace ou vapeur selon la température), 0.5 = moitié — c'est la calibration de `vaporStart`/`vaporRange` qui garantit qu'à température tempérée (5-15 °C), la quasi-totalité reste liquide plutôt que de partir en vapeur.
+- **DA** : interface volontairement monochrome (noir/blanc/gris) — seul le rendu de la planète (océan, terre, glace, végétation, cendres) et le graphique d'historique gardent de la couleur, parce qu'elle y porte une information qu'un niveau de gris ne rendrait pas aussi vite.
 
 Le modèle (`sim.js`) est pur : 1 pas = 1 an. L'UI (`ui.js`) ne fait que l'afficher.
 
