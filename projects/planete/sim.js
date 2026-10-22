@@ -83,42 +83,9 @@ const COEFFS = {
 const FIXED_DEFAULTS = { metals: 0.8, distance: 1, rotation: 0.5, volcanism: 0.3 };
 const DYNAMIC_DEFAULTS = { size: 0.5, water: 0.6, co2: 0.02, vegetation: 0.02 };
 
-// Planètes prêtes à l'emploi : 4 variables fixes + état initial (H2O et taille/masse en
-// font partie : elles peuvent varier d'une simulation à l'autre, contrairement à
-// métaux/distance/rotation/volcanisme qui sont des traits physiques immuables).
-const PRESETS = {
-  earth:      { label: "Terre",             fixed: { metals: 0.8, distance: 1,    rotation: 0.5, volcanism: 0.3 },  dynamic: { size: 0.67, water: 0.7, co2: 0.02, vegetation: 0.1 } },
-  ocean:      { label: "Océanique stable",  fixed: { metals: 0.9, distance: 1,    rotation: 0.5, volcanism: 0.3 },  dynamic: { size: 0.67, water: 0.9, co2: 0.02, vegetation: 0.05 } },
-  desert:     { label: "Désertique",        fixed: { metals: 0.8, distance: 0.85, rotation: 0.6, volcanism: 0.2 },  dynamic: { size: 0.58, water: 0,   co2: 0.02, vegetation: 0.05 } },
-  greenhouse: { label: "Effet de serre",    fixed: { metals: 0.8, distance: 0.55, rotation: 0.4, volcanism: 0.5 },  dynamic: { size: 0.75, water: 0.3, co2: 0.1,  vegetation: 0.02 } },
-  dead:       { label: "Morte",             fixed: { metals: 0.8, distance: 1,    rotation: 0.5, volcanism: 0 },    dynamic: { size: 0.83, water: 0,   co2: 0.02, vegetation: 0 } },
-  venus:      { label: "Vénus (pas de rotation)", fixed: { metals: 0.8, distance: 0.72, rotation: 0, volcanism: 0.6 }, dynamic: { size: 0.67, water: 0.3, co2: 0.05, vegetation: 0.02 } },
-  volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, distance: 1,    rotation: 0.3, volcanism: 3 }, dynamic: { size: 0.67, water: 0.4, co2: 0.05, vegetation: 0.02 } },
-  glaciation: { label: "Glaciation",        fixed: { metals: 0.8, distance: 1.6,  rotation: 0.5, volcanism: 0.1 },  dynamic: { size: 0.5,  water: 0.6, co2: 0.02, vegetation: 0.05 } },
-};
-
-// Missions : un point de départ difficile + un objectif à atteindre en jouant sur les
-// variables fixes (vivantes, pas besoin de relancer) et le nombre d'usines. Contrairement
-// aux archétypes (observer un phénomène), il s'agit de résoudre un problème — le modèle ne
-// s'en sort pas seul, voir `check`.
-const MISSIONS = {
-  co2dome: {
-    label: "Sous un dôme de CO2",
-    brief: "Un siècle d'industrie a saturé l'atmosphère de CO2 : la planète est bien au-dessus du seuil de surchauffe, la vie n'a plus la moindre chance de s'installer. Arrête les usines, et trouve comment faire redescendre la température (distance à l'étoile ? rotation ? volcanisme ?) pour qu'elle ait enfin une chance.",
-    fixed: { metals: 0.8, distance: 1, rotation: 0.5, volcanism: 0.2 },
-    dynamic: { size: 1.6, water: 0.5, co2: 0.25, vegetation: 0 },
-    factories: 30,
-    goal: { label: "Végétation > 20 %", check: (s) => s.vegetation > 0.2 },
-  },
-  iceball: {
-    label: "Boule de glace",
-    brief: "Cette planète (1,16 UA de son étoile, rotation rapide) est prise dans les glaces : sans eau liquide, la végétation plafonne à une petite frange désertique et n'ira jamais plus loin. Ajoute des usines pour produire du CO2, réchauffer suffisamment pour faire fondre la glace — mais pas trop, sous peine de rebasculer dans l'autre excès.",
-    fixed: { metals: 0.8, distance: 1.16, rotation: 0.9, volcanism: 0.15 },
-    dynamic: { size: 1, water: 0.6, co2: 0.02, vegetation: 0.02 },
-    factories: 0,
-    goal: { label: "Végétation > 50 %", check: (s) => s.vegetation > 0.5 },
-  },
-};
+// Archétypes (PRESETS) et missions (MISSIONS) : fichiers à part (presets.js, missions.js),
+// chargés comme scripts globaux dans le navigateur (voir index.html) et requis ici pour
+// `npm run sim`/les exports Node.
 
 const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
 // Rampe lissée : 0 avant `from`, 1 après `from + range`, linéaire entre les deux.
@@ -345,11 +312,14 @@ function step(fixed, s, factories, c) {
 }
 
 if (typeof module !== "undefined") {
+  const { PRESETS } = require("./presets.js");
+  const { MISSIONS } = require("./missions.js");
   module.exports = { COEFFS, PRESETS, MISSIONS, FIXED_DEFAULTS, DYNAMIC_DEFAULTS, clamp, coeffValues, insolation, initialAtmosphere, derive, step };
 }
 
 // `npm run sim` : trajectoire des archétypes, sans puis avec 30 usines dès l'an 150.
 if (typeof require !== "undefined" && require.main === module) {
+  const { PRESETS } = require("./presets.js");
   const c = coeffValues();
   for (const key in PRESETS) {
     const p = PRESETS[key];

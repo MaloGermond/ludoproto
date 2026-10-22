@@ -41,16 +41,16 @@ Le modèle (`sim.js`) est pur : 1 pas = 1 an. L'UI (`ui.js`) ne fait que l'affic
 
 ## Cas d'usage (archétypes)
 
-Voir [ARCHETYPES.md](ARCHETYPES.md) — un archétype par point de départ figé, pour observer un
-phénomène précis du modèle. Scénarios de non-régression manuels : après une modification de
-`sim.js`, relancer `npm run sim` et vérifier que chaque archétype illustre toujours le phénomène
-attendu.
+Définis dans [`presets.js`](presets.js) — un archétype par point de départ figé (4 variables
+fixes + état initial), pour observer un phénomène précis du modèle. Scénarios de non-régression
+manuels : après une modification de `sim.js`, relancer `npm run sim` et vérifier que chaque
+archétype illustre toujours le phénomène attendu.
 
 ## Missions
 
-Voir [MISSIONS.md](MISSIONS.md) — un problème à résoudre en jouant sur les variables fixes et le
-nombre d'usines pendant que la simulation tourne, contrairement aux archétypes (observer) et aux
-scénarios ci-dessous (vérifier une règle).
+Définies dans [`missions.js`](missions.js) — un problème à résoudre en jouant sur les variables
+fixes et le nombre d'usines pendant que la simulation tourne, contrairement aux archétypes
+(observer) et aux scénarios ci-dessous (vérifier une règle).
 
 ## Scénarios à tester (règles causales)
 
