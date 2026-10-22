@@ -4,28 +4,27 @@ Une planète au centre, un panneau d'édition à gauche, jauges et courbes en de
 
 ```bash
 npm run dev     # http://localhost:3002
-npm run sim     # trajectoire des 7 archétypes en console
+npm run sim     # trajectoire des 8 archétypes en console
 ```
 
 - **Variables fixes** (traits physiques immuables, modifiables en direct sans redémarrer) : métaux, distance à l'étoile, rotation, volcanisme.
 - **État initial** (point de départ, remet la simulation à zéro quand on y touche) : taille/masse de la planète, H2O (réservoir d'eau total, qui se répartit en glace / océans liquides / vapeur selon la température), CO2, végétation.
 - **Champ magnétique** : effet dynamo — a besoin à la fois de métaux (noyau conducteur), d'une rotation suffisante (pour le brasser) ET d'une activité volcanique suffisante (chaleur interne qui le fait convecter). Il manque n'importe lequel des trois et il n'y a aucun champ (ex. « Vénus » : métaux et volcanisme corrects, mais rotation nulle).
 - **Volcanisme : 1 = activité terrestre actuelle**, curseur jusqu'à 5× (Terre primitive / Io
-  actuel). Dégage un seul flux réparti en proportions réalistes (`volcanicOutput` × part de
-  chaque gaz, cf. panaches volcaniques réels ~60-90 % H2O, ~10-25 % CO2, le reste
-  cendres/aérosols) : H2O rejoint le réservoir de surface, CO2 et cendres montent dans
-  l'atmosphère. H2O et CO2 ont besoin du champ magnétique pour être retenus (sinon ils
-  s'échappent aussi vite que produits) ; les cendres, simple éjection physique, n'en ont
-  pas besoin. Le gaz inerte (N2/O2) n'est **pas** produit par le volcanisme (réaliste : il
-  vient de la formation de la planète) — avec le temps, l'atmosphère d'un monde
-  volcaniquement actif tend donc à se faire dominer par H2O/CO2, même si elle a démarré
-  surtout inerte. L'eau a son propre frein, plus marqué qu'un simple ralentissement
-  (`waterOutgasRate` × `(1-eau)²`) : un monde qui en manque vraiment en regagne nettement,
-  un monde déjà bien pourvu plafonne au lieu de continuer à grimper doucement vers 100 %.
-- **Quelques points incandescents** apparaissent sur la terre ferme (pas sous l'océan),
+  actuel). Dégage un seul flux réparti entre CO2 (`volcanicCO2Frac`, 60 % par défaut — ratio
+  réel CO2:cendres/SO2 dans un panache volcanique une fois l'H2O mis à part) et cendres (le
+  reste) : pas de lien avec l'eau (elle est réglée indépendamment en état initial, et ne
+  varie plus que par fuite, voir plus bas — le lien volcanisme→eau grossissait les océans
+  bien trop vite et était difficile à doser dans les deux sens). Le CO2 a besoin du champ
+  magnétique pour être retenu (sinon il s'échappe aussi vite que produit) ; les cendres,
+  simple éjection physique, n'en ont pas besoin. Le gaz inerte (N2/O2) n'est **pas** produit
+  par le volcanisme (réaliste : il vient de la formation de la planète). Calé pour qu'à 1×
+  il n'y ait pas encore de cendres notables, que ça commence vers 1,5×, et que la planète en
+  soit couverte vers 5×.
+- **Quelques points incandescents** (volcans) sur terre comme en mer (atténués sous l'eau),
   plus nombreux/intenses avec le volcanisme — percent légèrement sous la glace, mais pas
   sous un nuage de cendres épais.
-- **Atmosphère = une jauge de place disponible** : sa capacité totale (`atmCapacity`) découle de la taille/masse de la planète (gravité). Le gaz inerte démarre à 40 % de cette capacité (le reste se remplit avec le temps par le dégazage) et ne se reconstitue jamais une fois perdu — seuls CO2 et H2O/cendres sont alimentés en continu. Le remplissage réel (`atmFill`, gaz inerte + CO2 + vapeur + cendres, rapporté à la capacité) limite combien de CO2 peut encore rentrer (« place disponible », `room`) : plus elle est pleine, plus le dégazage de CO2 ralentit.
+- **Atmosphère = une jauge de place disponible** : sa capacité totale (`atmCapacity`) découle de la taille/masse de la planète (gravité). Le gaz inerte démarre à 40 % de cette capacité (le reste se remplit avec le temps par le dégazage de CO2) et ne se reconstitue jamais une fois perdu. Le remplissage réel (`atmFill`, gaz inerte + CO2 + vapeur + cendres, rapporté à la capacité) limite le dégazage volcanique de CO2 (« place disponible », `room`) — mais pas les usines : brûler du charbon ne lutte pas contre une contre-pression physique comme un dégazage volcanique, ça fait juste monter la concentration, donc même une atmosphère déjà pleine ne protège pas d'une industrialisation soutenue.
 - **Les cendres en altitude bloquent l'effet de serre** : au-delà d'un seuil d'opacité (`ashShieldStart`/`ashShieldRange`), le rayonnement est bloqué et l'effet de serre (gaz inerte + CO2 + vapeur) ne s'exerce plus du tout — il reprend dès que le nuage se dissipe, proportionnellement à ce qu'il reste de CO2/vapeur à ce moment. Signalé dans le panneau (☁️) quand actif.
 - **Phases de l'eau** : liquide seulement si la température ET la pression atmosphérique le permettent (`minPressureLiquid`) — mais sous ce seuil, l'eau ne disparaît pas d'un coup : elle bascule progressivement en vapeur (ou reste gelée si elle l'était déjà), proportionnellement au manque de pression, en conservant la masse totale (glace + océans + vapeur = H2O). Seule une petite fraction de ce qui est exposé (pas la glace polaire, protégée comme sur Mars) s'échappe réellement et irréversiblement vers l'espace avec le temps (`waterEscape`) — elle redevient une vraie source d'eau si l'atmosphère se reconstitue avant. H2O = taux de couverture : 1 = planète entièrement recouverte (liquide/glace/vapeur selon la température), 0.5 = moitié.
 - **Bandes climatiques** : la calotte polaire est calculée par bandes de latitude, pas sur la seule moyenne globale. Une rotation lente redistribue mal la chaleur (écart pôle-équateur marqué) → calotte potentiellement grande même si la moyenne globale est tempérée, ce qui pèse directement sur l'albédo global.
@@ -42,35 +41,16 @@ Le modèle (`sim.js`) est pur : 1 pas = 1 an. L'UI (`ui.js`) ne fait que l'affic
 
 ## Cas d'usage (archétypes)
 
-Chaque archétype du panneau « Archétypes » fixe les variables fixes + l'état initial pour mettre
-en avant un phénomène précis du modèle. Ce sont aussi des scénarios de non-régression manuels :
-après une modification de `sim.js`, relancer `npm run sim` et vérifier que chaque archétype illustre
-toujours le phénomène attendu (la trace ajoute 30 usines à partir de l'an 150 pour tous, donc tous
-finissent par un emballement du CO2 à terme — ce qui doit varier d'un archétype à l'autre, c'est la
-vitesse et le chemin, pas l'issue finale).
-
-| Archétype | Paramètres fixes (métaux/distance/rotation/volcanisme) | État initial (taille-masse/H2O/CO2/vég) | Phénomène mis en avant |
-|---|---|---|---|
-| Océanique stable | .9 / 1 / .5 / .3 | .67 / .9 / .02 / .05 | Référence tempérée, océans abondants : sert de point de comparaison pour les autres cas. |
-| Désertique | .8 / .85 / .6 / .2 | .58 / 0 / .02 / .05 | Sans eau liquide → pas d'océans → végétation plafonnée à `desertCap` (25 %), quels que soient l'atmosphère et le CO2. |
-| Effet de serre | .8 / .55 / .4 / .5 | .75 / .3 / .1 / .02 | Proche de l'étoile + CO2 de départ élevé → déjà au-dessus du seuil de surchauffe à l'an 0 : la végétation n'a jamais la moindre chance de s'installer. |
-| Morte | .8 / 1 / .5 / 0 | .83 / 0 / .02 / 0 | Métaux et rotation corrects, mais pas de volcanisme → pas de chaleur interne → pas d'effet dynamo malgré un noyau conducteur → l'atmosphère se dissipe quand même (ralenti par sa grande taille). Sans eau dès le départ. Montre que métaux et rotation seuls ne suffisent pas : il faut aussi de la chaleur interne. |
-| Volcanique sombre | .7 / 1 / .3 / .95 | .67 / .4 / .05 / .02 | Volcanisme extrême → cendres abondantes (haze ≈ 0.53, juste au-dessus du seuil de 50 %) qui refroidissent la planète par l'albédo (`albedoHaze`) et freinent la végétation (`transparency`), tout en dégazant beaucoup de CO2 et d'atmosphère. |
-| Glaciation | .8 / 1.6 / .5 / .1 | .5 / .6 / .02 / .05 | Loin de l'étoile → démarre gelé (eau sous forme de glace) : la végétation doit s'installer dans le froid avant que le CO2 (notamment industriel) ne réchauffe la planète. |
-| Vénus (pas de rotation) | .8 / .72 / 0 / .6 | .67 / .3 / .05 / .02 | Métaux et volcanisme suffisants pour un champ magnétique, mais rotation nulle → pas d'effet dynamo → aucune reconstitution de l'atmosphère, qui s'effondre vers ~0 en quelques centaines d'années malgré un bon point de départ. |
+Voir [ARCHETYPES.md](ARCHETYPES.md) — un archétype par point de départ figé, pour observer un
+phénomène précis du modèle. Scénarios de non-régression manuels : après une modification de
+`sim.js`, relancer `npm run sim` et vérifier que chaque archétype illustre toujours le phénomène
+attendu.
 
 ## Missions
 
-Contrairement aux archétypes (observer un phénomène) et aux scénarios (vérifier une règle),
-une mission pose un problème à résoudre en jouant sur les variables fixes (vivantes, pas
-besoin de relancer) et le nombre d'usines pendant que la simulation tourne. Le panneau de
-droite affiche la consigne et suit l'objectif en direct (✓ une fois atteint). Définies dans
-`MISSIONS` (`sim.js`).
-
-| Mission | Point de départ | Objectif | Piste |
-|---|---|---|---|
-| Sous un dôme de CO2 | 30 usines déjà actives, CO2 à 0.25 sur une grande planète (taille 1.6, effet de serre puissant) : la température grimpe au-dessus du seuil, aucune végétation. | Végétation > 20 %. | Le modèle ne s'en sort pas seul tant que les usines tournent (`co2`/`temp` montent sans fin). Couper les usines suffit : la température retombe sous le seuil et le CO2 se résorbe une fois la végétation installée. |
-| Boule de glace | 1,12 UA, rotation rapide : planète gelée, végétation plafonnée à la frange désertique (~21 %) sans jamais progresser, même après 300 ans. | Végétation > 50 %. | Point de bascule net plutôt qu'un dégradé : à 0 usine, rien ne change ; à partir de 10, le réchauffement suffit à faire fondre assez de glace pour déclencher une boucle positive (plus d'océans → plus de vie → …). |
+Voir [MISSIONS.md](MISSIONS.md) — un problème à résoudre en jouant sur les variables fixes et le
+nombre d'usines pendant que la simulation tourne, contrairement aux archétypes (observer) et aux
+scénarios ci-dessous (vérifier une règle).
 
 ## Scénarios à tester (règles causales)
 

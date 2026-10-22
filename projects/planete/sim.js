@@ -14,20 +14,14 @@ const COEFFS = {
   gravityRetention:  { label: "Réduction de la fuite d'atmosphère par unité de taille/masse", value: 1, min: 0, max: 2, step: 0.05 },
   dissipation:     { label: "Dissipation de l'atmosphère (sans champ)", value: 0.01, min: 0, max: 0.05, step: 0.0005 },
   baseLoss:        { label: "Fuite d'atmosphère résiduelle (avec champ)", value: 0.0002, min: 0, max: 0.01, step: 0.0001 },
-  // le volcanisme dégage un seul flux total, réparti selon des proportions réalistes de
-  // gaz volcanique (H2O largement majoritaire, puis CO2, le reste en cendres/aérosols) —
-  // cf. mesures de panaches volcaniques réels (~60-90 % H2O, ~10-25 % CO2, le reste SO2
-  // et particules). Le gaz inerte (N2/O2) n'est PAS produit par le volcanisme dans ce
-  // modèle (réaliste : il vient de la formation de la planète, pas de son dégazage actif).
-  volcanicOutput:  { label: "Dégazage volcanique total (tous gaz confondus)", value: 0.08, min: 0, max: 0.1, step: 0.001 },
-  volcanicH2OFrac: { label: "Part d'H2O dans le dégazage volcanique", value: 0.75, min: 0, max: 1, step: 0.01 },
-  // contrairement au CO2/cendres (limités par la place disponible dans l'atmosphère),
-  // rien ne freinait l'eau — elle finissait toujours par couvrir toute la planète, même
-  // un monde voulu sec. En vrai, remplir des océans par dégazage prend des centaines de
-  // millions d'années, bien plus lentement que l'équilibrage de l'atmosphère : ce taux
-  // ralentit l'eau spécifiquement, indépendamment de volcanicOutput.
-  waterOutgasRate: { label: "Vitesse à laquelle l'H2O volcanique devient de l'eau de surface", value: 0.15, min: 0, max: 1, step: 0.01 },
-  volcanicCO2Frac: { label: "Part de CO2 dans le dégazage volcanique", value: 0.15, min: 0, max: 1, step: 0.01 },
+  // le volcanisme dégage un seul flux total, réparti entre CO2 et cendres/aérosols — le
+  // gaz inerte (N2/O2) n'est PAS produit par le volcanisme dans ce modèle (réaliste : il
+  // vient de la formation de la planète, pas de son dégazage actif). Pas de lien avec
+  // l'eau : ça faisait grossir les océans beaucoup trop vite, et c'était difficile à doser
+  // sans que ça parte dans un sens ou dans l'autre — l'eau est maintenant une variable
+  // d'état initial indépendante, qui ne varie plus que par fuite (voir `waterEscape`).
+  volcanicOutput:  { label: "Dégazage volcanique total (CO2 + cendres)", value: 0.02, min: 0, max: 0.1, step: 0.001 },
+  volcanicCO2Frac: { label: "Part de CO2 dans le dégazage volcanique (reste = cendres)", value: 0.6, min: 0, max: 1, step: 0.01 },
   factoryCo2:      { label: "CO2 émis par usine / an", value: 0.0005, min: 0, max: 0.005, step: 0.0001 },
   vegAbsorb:       { label: "Absorption du CO2 par la végétation", value: 0.05, min: 0, max: 0.2, step: 0.001 },
   oceanAbsorb:     { label: "Absorption du CO2 par les océans", value: 0.01, min: 0, max: 0.1, step: 0.001 },
@@ -52,8 +46,10 @@ const COEFFS = {
   albedoSensitivity: { label: "Sensibilité de la température à l'albédo (°C)", value: 40, min: 0, max: 100, step: 1 },
   // couche de cendres en altitude : au-delà du seuil, elle bloque le rayonnement et empêche
   // l'effet de serre (H2O+CO2) de s'exercer — une fois dissipée, il reprend normalement.
-  ashShieldStart: { label: "Opacité de cendres à partir de laquelle l'effet de serre se bloque", value: 0.1, min: 0, max: 1, step: 0.01 },
-  ashShieldRange: { label: "Plage jusqu'au blocage complet de l'effet de serre", value: 0.2, min: 0.01, max: 1, step: 0.01 },
+  // calé pour qu'à 1× l'activité terrestre il n'y ait pas encore de blocage, que ça
+  // commence vers 1,5×, et que ce soit total vers 5× (couverture complète de cendres).
+  ashShieldStart: { label: "Opacité de cendres à partir de laquelle l'effet de serre se bloque", value: 0.15, min: 0, max: 1, step: 0.01 },
+  ashShieldRange: { label: "Plage jusqu'au blocage complet de l'effet de serre", value: 0.31, min: 0.01, max: 1, step: 0.01 },
 
   ashDecay:   { label: "Vitesse de retombée des cendres", value: 0.03, min: 0, max: 0.3, step: 0.005 },
   ashRainout: { label: "Lessivage des cendres par la pluie (océans + vapeur)", value: 1, min: 0, max: 5, step: 0.1 },
@@ -91,12 +87,13 @@ const DYNAMIC_DEFAULTS = { size: 0.5, water: 0.6, co2: 0.02, vegetation: 0.02 };
 // font partie : elles peuvent varier d'une simulation à l'autre, contrairement à
 // métaux/distance/rotation/volcanisme qui sont des traits physiques immuables).
 const PRESETS = {
+  earth:      { label: "Terre",             fixed: { metals: 0.8, distance: 1,    rotation: 0.5, volcanism: 0.3 },  dynamic: { size: 0.67, water: 0.7, co2: 0.02, vegetation: 0.1 } },
   ocean:      { label: "Océanique stable",  fixed: { metals: 0.9, distance: 1,    rotation: 0.5, volcanism: 0.3 },  dynamic: { size: 0.67, water: 0.9, co2: 0.02, vegetation: 0.05 } },
   desert:     { label: "Désertique",        fixed: { metals: 0.8, distance: 0.85, rotation: 0.6, volcanism: 0.2 },  dynamic: { size: 0.58, water: 0,   co2: 0.02, vegetation: 0.05 } },
   greenhouse: { label: "Effet de serre",    fixed: { metals: 0.8, distance: 0.55, rotation: 0.4, volcanism: 0.5 },  dynamic: { size: 0.75, water: 0.3, co2: 0.1,  vegetation: 0.02 } },
   dead:       { label: "Morte",             fixed: { metals: 0.8, distance: 1,    rotation: 0.5, volcanism: 0 },    dynamic: { size: 0.83, water: 0,   co2: 0.02, vegetation: 0 } },
   venus:      { label: "Vénus (pas de rotation)", fixed: { metals: 0.8, distance: 0.72, rotation: 0, volcanism: 0.6 }, dynamic: { size: 0.67, water: 0.3, co2: 0.05, vegetation: 0.02 } },
-  volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, distance: 1,    rotation: 0.3, volcanism: 0.95 }, dynamic: { size: 0.67, water: 0.4, co2: 0.05, vegetation: 0.02 } },
+  volcanic:   { label: "Volcanique sombre", fixed: { metals: 0.7, distance: 1,    rotation: 0.3, volcanism: 3 }, dynamic: { size: 0.67, water: 0.4, co2: 0.05, vegetation: 0.02 } },
   glaciation: { label: "Glaciation",        fixed: { metals: 0.8, distance: 1.6,  rotation: 0.5, volcanism: 0.1 },  dynamic: { size: 0.5,  water: 0.6, co2: 0.02, vegetation: 0.05 } },
 };
 
@@ -115,9 +112,9 @@ const MISSIONS = {
   },
   iceball: {
     label: "Boule de glace",
-    brief: "Cette planète (1,13 UA de son étoile, rotation rapide) est prise dans les glaces : sans eau liquide, la végétation plafonne à une petite frange désertique et n'ira jamais plus loin. Ajoute des usines pour produire du CO2, réchauffer suffisamment pour faire fondre la glace — mais pas trop, sous peine de rebasculer dans l'autre excès.",
-    fixed: { metals: 0.8, distance: 1.12, rotation: 0.9, volcanism: 0.15 },
-    dynamic: { size: 0.68, water: 0.6, co2: 0.02, vegetation: 0.02 },
+    brief: "Cette planète (1,16 UA de son étoile, rotation rapide) est prise dans les glaces : sans eau liquide, la végétation plafonne à une petite frange désertique et n'ira jamais plus loin. Ajoute des usines pour produire du CO2, réchauffer suffisamment pour faire fondre la glace — mais pas trop, sous peine de rebasculer dans l'autre excès.",
+    fixed: { metals: 0.8, distance: 1.16, rotation: 0.9, volcanism: 0.15 },
+    dynamic: { size: 1, water: 0.6, co2: 0.02, vegetation: 0.02 },
     factories: 0,
     goal: { label: "Végétation > 50 %", check: (s) => s.vegetation > 0.5 },
   },
@@ -266,27 +263,25 @@ function step(fixed, s, factories, c) {
   const loss = (c.dissipation * (1 - d.magnetic) + c.baseLoss) * gravityFactor;
   atmosphere = clamp(atmosphere - atmosphere * loss, 0, d.atmCapacity);
 
-  // dégazage volcanique : un seul flux, réparti en proportions réalistes (H2O, CO2,
-  // cendres — voir COEFFS). H2O et CO2 sont de vrais gaz qui occupent la place disponible
-  // dans l'atmosphère (`room`, la « jauge » affichée dans le panneau) : plus elle est
-  // pleine, moins il peut en rentrer. L'eau va au réservoir de surface (pas au ciel) donc
-  // garde sa propre saturation (pas celle du ciel) ; les cendres sont des particules en
-  // suspension, pas un gaz — elles n'occupent pas ce volume et ne sont donc pas limitées
-  // par la même jauge. H2O et CO2 ont aussi besoin du champ magnétique pour être retenus
-  // (sinon ils s'échappent aussi vite qu'ils sont produits) ; les cendres, simple
-  // éjection physique, n'en ont pas besoin.
+  // dégazage volcanique : un seul flux, réparti entre CO2 et cendres (voir COEFFS). Le CO2
+  // est un vrai gaz qui occupe la place disponible dans l'atmosphère (`room`, la « jauge »
+  // affichée dans le panneau) : plus elle est pleine, moins il peut en rentrer. Les
+  // cendres sont des particules en suspension, pas un gaz — elles n'occupent pas ce volume
+  // et ne sont donc pas limitées par la même jauge. Le CO2 a aussi besoin du champ
+  // magnétique pour être retenu (sinon il s'échappe aussi vite qu'il est produit) ; les
+  // cendres, simple éjection physique, n'en ont pas besoin. Pas de lien avec l'eau : elle
+  // ne varie plus que par fuite (voir plus haut), c'est une variable d'état initial, pas
+  // un produit du volcanisme.
   const volcTotal = c.volcanicOutput * fixed.volcanism;
-  const volcH2O = clamp(c.volcanicH2OFrac, 0, 1);
-  const volcCO2 = clamp(c.volcanicCO2Frac, 0, 1 - volcH2O);
-  const volcAsh = clamp(1 - volcH2O - volcCO2);
+  const volcCO2 = clamp(c.volcanicCO2Frac, 0, 1);
+  const volcAsh = clamp(1 - volcCO2);
   const room = clamp(1 - d.atmFill);
-  // (1-water)² plutôt que (1-water) : un monde qui manque vraiment d'eau en gagne
-  // nettement, un monde déjà bien pourvu plafonne au lieu de continuer à grimper
-  // doucement vers 100 % indéfiniment.
-  water = clamp(water + volcTotal * volcH2O * c.waterOutgasRate * d.magnetic * (1 - water) ** 2, 0, 1);
 
-  // CO2 : usines + volcans, absorbé par végétation et océans, emporté avec l'atmosphère
-  co2 += (factories * c.factoryCo2 + volcTotal * volcCO2 * d.magnetic) * room;
+  // CO2 : usines (pas limitées par la place disponible — brûler du charbon ne lutte pas
+  // contre une contre-pression physique comme un dégazage volcanique, ça fait juste
+  // monter la concentration) + volcans (eux, limités par `room`), absorbé par végétation
+  // et océans, emporté avec l'atmosphère
+  co2 += factories * c.factoryCo2 + volcTotal * volcCO2 * d.magnetic * room;
   co2 -= co2 * (d.co2AbsorbVeg + d.co2AbsorbOcean);
   co2 -= co2 * loss;
   co2 = clamp(co2, 0, 1);

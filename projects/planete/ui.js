@@ -249,14 +249,16 @@ function renderSurface(d, rot) {
       // cendres volcaniques déposées au sol : gris clair (pas noir — les cendres réelles sont
       // claires), sauf sous la glace
       r = mix(r, 165, ash * (1 - frost)); g = mix(g, 160, ash * (1 - frost)); b = mix(b, 155, ash * (1 - frost));
-      // points volcaniques incandescents : quelques taches fixes sur la terre (bruit à
-      // haute fréquence, indépendant du reste), plus nombreuses/intenses avec l'activité
-      // volcanique — percent légèrement sous la glace, par-dessus le reste.
-      if (n >= sea && frost < 0.9) {
+      // points volcaniques incandescents : quelques taches fixes (bruit à haute fréquence,
+      // indépendant du reste), sur terre comme en mer (volcans sous-marins, un peu plus
+      // atténués vus à travers l'eau), plus nombreux/intenses avec l'activité volcanique —
+      // percent légèrement sous la glace, par-dessus le reste.
+      if (frost < 0.9) {
         const volcIntensity = clampUi(fixed.volcanism / 2);
         if (volcIntensity > 0.02) {
           const spot = fbm(px * 9 + 300, y * 9 + 300, pz * 9 + 300);
-          const glow = smooth(clampUi((spot - (0.78 - 0.22 * volcIntensity)) / 0.05)) * (1 - frost * 0.7);
+          const underwater = n < sea ? 0.6 : 1; // vu à travers l'eau : un peu plus atténué
+          const glow = smooth(clampUi((spot - (0.78 - 0.22 * volcIntensity)) / 0.05)) * (1 - frost * 0.7) * underwater;
           if (glow > 0) { r = mix(r, 255, glow); g = mix(g, 140, glow); b = mix(b, 30, glow); }
         }
       }
