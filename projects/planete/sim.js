@@ -14,8 +14,14 @@ const COEFFS = {
   gravityRetention:  { label: "Réduction de la fuite d'atmosphère par unité de taille/masse", value: 1, min: 0, max: 2, step: 0.05 },
   dissipation:     { label: "Dissipation de l'atmosphère (sans champ)", value: 0.01, min: 0, max: 0.05, step: 0.0005 },
   baseLoss:        { label: "Fuite d'atmosphère résiduelle (avec champ)", value: 0.0002, min: 0, max: 0.01, step: 0.0001 },
-  outgassing:      { label: "Dégazage volcanique (avec champ)", value: 0.004, min: 0, max: 0.05, step: 0.0005 },
-  volcanicCo2:     { label: "CO2 volcanique naturel", value: 0.0005, min: 0, max: 0.01, step: 0.0001 },
+  // le volcanisme dégage un seul flux total, réparti selon des proportions réalistes de
+  // gaz volcanique (H2O largement majoritaire, puis CO2, le reste en cendres/aérosols) —
+  // cf. mesures de panaches volcaniques réels (~60-90 % H2O, ~10-25 % CO2, le reste SO2
+  // et particules). Le gaz inerte (N2/O2) n'est PAS produit par le volcanisme dans ce
+  // modèle (réaliste : il vient de la formation de la planète, pas de son dégazage actif).
+  volcanicOutput:  { label: "Dégazage volcanique total (tous gaz confondus)", value: 0.08, min: 0, max: 0.1, step: 0.001 },
+  volcanicH2OFrac: { label: "Part d'H2O dans le dégazage volcanique", value: 0.75, min: 0, max: 1, step: 0.01 },
+  volcanicCO2Frac: { label: "Part de CO2 dans le dégazage volcanique", value: 0.15, min: 0, max: 1, step: 0.01 },
   factoryCo2:      { label: "CO2 émis par usine / an", value: 0.0005, min: 0, max: 0.005, step: 0.0001 },
   vegAbsorb:       { label: "Absorption du CO2 par la végétation", value: 0.05, min: 0, max: 0.2, step: 0.001 },
   oceanAbsorb:     { label: "Absorption du CO2 par les océans", value: 0.01, min: 0, max: 0.1, step: 0.001 },
@@ -30,7 +36,6 @@ const COEFFS = {
   vaporStart:      { label: "Température de départ de l'évaporation (°C)", value: 20, min: -40, max: 60, step: 1 },
   vaporRange:      { label: "Plage de saturation de la vapeur d'eau (°C)", value: 80, min: 5, max: 120, step: 1 },
   vaporGreenhouse: { label: "Effet de serre de la vapeur d'eau (°C × vapeur)", value: 25, min: 0, max: 80, step: 1 },
-  vaporToAtm:      { label: "Vapeur d'eau rejoignant l'atmosphère (évaporation)", value: 0.01, min: 0, max: 0.05, step: 0.001 },
 
   albedoBase:        { label: "Albédo de base (roche nue)", value: 0.3, min: 0, max: 0.9, step: 0.01 },
   albedoIce:         { label: "Albédo supplémentaire de la glace", value: 0.5, min: 0, max: 0.9, step: 0.01 },
@@ -39,8 +44,11 @@ const COEFFS = {
   albedoAsh:         { label: "Albédo en plus des cendres au sol (gris clair)", value: 0.15, min: 0, max: 0.4, step: 0.01 },
   albedoHaze:        { label: "Albédo en plus du nuage de cendres (passé 50 % d'opacité)", value: 0.25, min: 0, max: 0.5, step: 0.01 },
   albedoSensitivity: { label: "Sensibilité de la température à l'albédo (°C)", value: 40, min: 0, max: 100, step: 1 },
+  // couche de cendres en altitude : au-delà du seuil, elle bloque le rayonnement et empêche
+  // l'effet de serre (H2O+CO2) de s'exercer — une fois dissipée, il reprend normalement.
+  ashShieldStart: { label: "Opacité de cendres à partir de laquelle l'effet de serre se bloque", value: 0.1, min: 0, max: 1, step: 0.01 },
+  ashShieldRange: { label: "Plage jusqu'au blocage complet de l'effet de serre", value: 0.2, min: 0.01, max: 1, step: 0.01 },
 
-  ashRate:    { label: "Production de cendres volcaniques", value: 0.05, min: 0, max: 0.3, step: 0.005 },
   ashDecay:   { label: "Vitesse de retombée des cendres", value: 0.03, min: 0, max: 0.3, step: 0.005 },
   ashRainout: { label: "Lessivage des cendres par la pluie (océans + vapeur)", value: 1, min: 0, max: 5, step: 0.1 },
   ashDeposit:    { label: "Part des cendres qui se dépose au sol en retombant", value: 0.3, min: 0, max: 1, step: 0.01 },
@@ -95,15 +103,15 @@ const MISSIONS = {
     label: "Sous un dôme de CO2",
     brief: "Un siècle d'industrie a saturé l'atmosphère de CO2 : la planète est bien au-dessus du seuil de surchauffe, la vie n'a plus la moindre chance de s'installer. Arrête les usines, et trouve comment faire redescendre la température (distance à l'étoile ? rotation ? volcanisme ?) pour qu'elle ait enfin une chance.",
     fixed: { metals: 0.8, distance: 1, rotation: 0.5, volcanism: 0.2 },
-    dynamic: { size: 0.6, water: 0.5, co2: 0.6, vegetation: 0 },
-    factories: 0,
+    dynamic: { size: 1.6, water: 0.5, co2: 0.25, vegetation: 0 },
+    factories: 30,
     goal: { label: "Végétation > 20 %", check: (s) => s.vegetation > 0.2 },
   },
   iceball: {
     label: "Boule de glace",
     brief: "Cette planète (1,13 UA de son étoile, rotation rapide) est prise dans les glaces : sans eau liquide, la végétation plafonne à une petite frange désertique et n'ira jamais plus loin. Ajoute des usines pour produire du CO2, réchauffer suffisamment pour faire fondre la glace — mais pas trop, sous peine de rebasculer dans l'autre excès.",
-    fixed: { metals: 0.8, distance: 1.13, rotation: 0.9, volcanism: 0.15 },
-    dynamic: { size: 0.6, water: 0.6, co2: 0.02, vegetation: 0.02 },
+    fixed: { metals: 0.8, distance: 1.11, rotation: 0.9, volcanism: 0.15 },
+    dynamic: { size: 0.7, water: 0.6, co2: 0.02, vegetation: 0.02 },
     factories: 0,
     goal: { label: "Végétation > 50 %", check: (s) => s.vegetation > 0.5 },
   },
@@ -140,7 +148,10 @@ function insolation(fixed) {
 // Atmosphère initiale déduite de la taille/masse de la planète (gravité qui retient les gaz
 // dès l'origine) plutôt que réglée à la main.
 function initialAtmosphere(dynamic, c) {
-  return clamp(dynamic.size * c.sizeToAtm, 0, 2);
+  // le gaz inerte primordial ne remplit qu'une partie de la capacité totale (le reste de
+  // la « place disponible » se remplit avec le temps via le dégazage volcanique — H2O,
+  // CO2, cendres) ; sinon rien ne pourrait jamais s'ajouter dès le premier pas.
+  return clamp(dynamic.size * c.sizeToAtm * 0.4, 0, 2);
 }
 
 // Grandeurs déduites de l'état courant (pas de mémoire propre).
@@ -188,12 +199,24 @@ function derive(fixed, s, factories, c) {
   const hazeAlbedo = c.albedoHaze * ramp(s.haze, 0.5, 0.5);
   const albedo = clamp(c.albedoBase + c.albedoIce * ice + c.albedoAsh * s.groundAsh + hazeAlbedo - c.albedoOcean * oceans - c.albedoVeg * s.vegetation, 0.05, 0.9);
 
+  // la couche de cendres en altitude bloque le rayonnement : au-delà du seuil, l'effet de
+  // serre (gaz inerte + CO2 + vapeur) ne peut plus s'exercer du tout ; il reprend dès que
+  // le nuage se dissipe, proportionnellement à ce qu'il reste de CO2/vapeur à ce moment.
+  const greenhouseActive = clamp(1 - ramp(s.haze, c.ashShieldStart, c.ashShieldRange));
+
   // température d'équilibre : insolation ajustée par l'albédo, plus les effets de serre
-  // (atmosphère/CO2, vapeur d'eau).
+  // (atmosphère/CO2, vapeur d'eau) sauf si les cendres les bloquent.
   const equilibriumTemp = baseTemp
     + c.albedoSensitivity * (c.albedoBase - albedo)
-    + s.atmosphere * (c.naturalGreen + c.greenhouse * s.co2)
-    + c.vaporGreenhouse * vapor;
+    + greenhouseActive * (s.atmosphere * (c.naturalGreen + c.greenhouse * s.co2) + c.vaporGreenhouse * vapor);
+
+  // capacité totale de l'atmosphère (gravité/taille) et remplissage actuel, tous gaz
+  // confondus (gaz inerte + CO2 + vapeur + cendres) — la « jauge de place disponible »
+  // affichée dans le panneau. C'est cette pression totale, pas le seul gaz inerte, qui
+  // compte pour la végétation et le vent ci-dessous.
+  const atmTotal = s.atmosphere + s.co2 + vapor + s.haze;
+  const atmCapacity = Math.max(0.0001, s.size * c.sizeToAtm);
+  const atmFill = clamp(atmTotal / atmCapacity);
 
   const overheat = c.overheatRef * (1 - c.overheatDist + c.overheatDist * fixed.distance);
   // la végétation (terrestre + marine) est plafonnée par la couverture d'océan actuelle,
@@ -201,9 +224,9 @@ function derive(fixed, s, factories, c) {
   // terme (pas seulement la vitesse à laquelle elle s'installe) : CO2/O2 disponibles,
   // rétention de l'eau, protection contre les UV.
   const oceanCap = oceans < 0.1 ? c.desertCap : c.desertCap + (1 - c.desertCap) * clamp(oceans / 0.5);
-  const vegCap = oceanCap * clamp(s.atmosphere / 0.5);
+  const vegCap = oceanCap * clamp(atmTotal / 0.5);
   // vent : rotation rapide et atmosphère dense amplifient l'effet d'un écart thermique
-  const wind = c.windRotation * fixed.rotation + c.windAtmosphere * s.atmosphere * clamp(Math.abs(temp - baseTemp) / 40);
+  const wind = c.windRotation * fixed.rotation + c.windAtmosphere * atmTotal * clamp(Math.abs(temp - baseTemp) / 40);
   // part du CO2 atmosphérique captée chaque année, par le vivant terrestre et par le
   // phytoplancton océanique. Les deux retombent à 0 sans végétation : dans ce modèle,
   // c'est la vie (pas l'eau en elle-même) qui capte le CO2 — pas de biosphère, pas de
@@ -212,7 +235,7 @@ function derive(fixed, s, factories, c) {
   const co2AbsorbVeg = c.vegAbsorb * s.vegetation;
   const co2AbsorbOcean = c.oceanAbsorb * oceans * bioPresence;
 
-  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, pressureFrac, transparency, albedo, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean, groundAsh: s.groundAsh };
+  return { magnetic, baseTemp, temp, equilibriumTemp, ice, oceans, vapor, pressureFrac, transparency, albedo, greenhouseActive, atmTotal, atmCapacity, atmFill, overheat, vegCap, wind, co2AbsorbVeg, co2AbsorbOcean, groundAsh: s.groundAsh };
 }
 
 // Avance l'état d'un an. Retourne le nouvel état (l'ancien n'est pas modifié).
@@ -228,33 +251,43 @@ function step(fixed, s, factories, c) {
   const iceFrac = water > 0 ? d.ice / water : 0;
   water = Math.max(0, water - c.waterEscape * water * (1 - iceFrac) * (1 - d.pressureFrac));
 
-  // atmosphère : fuite sans champ magnétique, dégazage avec (mis à l'échelle du volcanisme),
-  // et vapeur d'eau qui la rejoint quand les océans chauffent et s'évaporent — boucle
-  // d'emballement réaliste (type Vénus) : plus chaud → plus de vapeur → atmosphère plus
-  // dense/humide → effet de serre renforcé → encore plus chaud. Les deux sources de
-  // reconstitution ont besoin du champ magnétique : sans lui, rien ne compense la fuite et
-  // l'atmosphère s'effondre franchement (pas d'équilibre résiduel artificiel). Une planète
-  // plus grande/massive retient aussi mieux ses gaz par sa seule gravité, indépendamment
-  // du champ magnétique.
+  // gaz inerte (N2/O2) : fuite sans champ magnétique, aucune reconstitution (le volcanisme
+  // ne produit pas ce genre de gaz, voir plus bas) — une planète finit donc par voir son
+  // atmosphère dominée par ce que le volcanisme produit réellement (H2O, CO2), même si
+  // elle a démarré avec surtout du gaz inerte. Une planète plus grande/massive le retient
+  // mieux par sa seule gravité, indépendamment du champ magnétique.
   const gravityFactor = clamp(1 - c.gravityRetention * (size - 0.5), 0.1, 2);
   const loss = (c.dissipation * (1 - d.magnetic) + c.baseLoss) * gravityFactor;
-  const lossAmount = atmosphere * loss;
-  atmosphere += d.magnetic * (c.outgassing * fixed.volcanism + c.vaporToAtm * d.vapor) * (1 - atmosphere) - lossAmount;
-  atmosphere = clamp(atmosphere, 0, 2);
+  atmosphere = clamp(atmosphere - atmosphere * loss, 0, d.atmCapacity);
 
-  // CO2 : usines + volcans (mis à l'échelle du volcanisme), absorbé par végétation et
-  // océans, emporté avec l'atmosphère
-  co2 += factories * c.factoryCo2 + c.volcanicCo2 * fixed.volcanism * d.magnetic;
+  // dégazage volcanique : un seul flux, réparti en proportions réalistes (H2O, CO2,
+  // cendres — voir COEFFS). H2O et CO2 sont de vrais gaz qui occupent la place disponible
+  // dans l'atmosphère (`room`, la « jauge » affichée dans le panneau) : plus elle est
+  // pleine, moins il peut en rentrer. L'eau va au réservoir de surface (pas au ciel) donc
+  // garde sa propre saturation (pas celle du ciel) ; les cendres sont des particules en
+  // suspension, pas un gaz — elles n'occupent pas ce volume et ne sont donc pas limitées
+  // par la même jauge. H2O et CO2 ont aussi besoin du champ magnétique pour être retenus
+  // (sinon ils s'échappent aussi vite qu'ils sont produits) ; les cendres, simple
+  // éjection physique, n'en ont pas besoin.
+  const volcTotal = c.volcanicOutput * fixed.volcanism;
+  const volcH2O = clamp(c.volcanicH2OFrac, 0, 1);
+  const volcCO2 = clamp(c.volcanicCO2Frac, 0, 1 - volcH2O);
+  const volcAsh = clamp(1 - volcH2O - volcCO2);
+  const room = clamp(1 - d.atmFill);
+  water = clamp(water + volcTotal * volcH2O * d.magnetic * (1 - water), 0, 1);
+
+  // CO2 : usines + volcans, absorbé par végétation et océans, emporté avec l'atmosphère
+  co2 += (factories * c.factoryCo2 + volcTotal * volcCO2 * d.magnetic) * room;
   co2 -= co2 * (d.co2AbsorbVeg + d.co2AbsorbOcean);
   co2 -= co2 * loss;
   co2 = clamp(co2, 0, 1);
 
-  // cendres volcaniques : montent avec le volcanisme, retombent seules (boucle stabilisatrice)
-  // et d'autant plus vite qu'il y a de l'eau liquide ou de la vapeur — la pluie est le
-  // principal mécanisme qui lessive les aérosols/cendres de l'atmosphère.
+  // cendres volcaniques : montent avec le volcanisme, retombent seules (boucle
+  // stabilisatrice) et d'autant plus vite qu'il y a de l'eau liquide ou de la vapeur — la
+  // pluie est le principal mécanisme qui lessive les aérosols/cendres de l'atmosphère.
   const rainout = 1 + c.ashRainout * (d.oceans + d.vapor);
   const ashFalling = c.ashDecay * haze * rainout; // ce qui retombe cette année-là
-  haze += c.ashRate * fixed.volcanism * (1 - haze) - ashFalling;
+  haze += volcTotal * volcAsh * (1 - haze) - ashFalling;
   haze = clamp(haze, 0, 1);
 
   // une partie de ce qui retombe se dépose au sol et s'accumule (assombrit la surface,
@@ -280,7 +313,8 @@ function step(fixed, s, factories, c) {
   // suspension bloquent une partie de la lumière (et retombent sur les feuilles),
   // ce qui ralentit directement la croissance (en plus de l'effet sur l'albédo/climat
   // une fois le nuage assez épais, voir `albedoHaze` dans `derive`).
-  const lifeOk = atmosphere > c.atmMinVeg && d.temp < d.overheat;
+  const atmTotalNow = atmosphere + co2 + d.vapor + haze; // pression totale actuelle, pas le seul gaz inerte
+  const lifeOk = atmTotalNow > c.atmMinVeg && d.temp < d.overheat;
   if (lifeOk) {
     const co2Fert = clamp(co2 / c.co2Optimal);
     const boost = 1 + c.co2Boost * co2Fert;
@@ -289,7 +323,7 @@ function step(fixed, s, factories, c) {
   }
   if (d.temp > d.overheat) vegetation -= vegetation * c.collapse * ((d.temp - d.overheat) / 10);
   if (co2 > c.co2Toxic) vegetation -= vegetation * c.co2Damage * clamp((co2 - c.co2Toxic) / Math.max(0.01, 1 - c.co2Toxic));
-  if (atmosphere <= c.atmMinVeg) vegetation -= vegetation * 0.05;
+  if (atmTotalNow <= c.atmMinVeg) vegetation -= vegetation * 0.05;
   if (vegetation > d.vegCap) vegetation -= (vegetation - d.vegCap) * 0.1;
   vegetation = clamp(vegetation, 0, 1);
 

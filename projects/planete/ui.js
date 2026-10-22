@@ -247,13 +247,14 @@ function renderSurface(d, rot) {
       // cendres volcaniques déposées au sol : gris clair (pas noir — les cendres réelles sont
       // claires), sauf sous la glace
       r = mix(r, 165, ash * (1 - frost)); g = mix(g, 160, ash * (1 - frost)); b = mix(b, 155, ash * (1 - frost));
-      // nuage de cendres en suspension : texture de bruit indépendante (dérive un peu plus
-      // vite que le sol), couverture et opacité qui montent avec le niveau de cendres —
-      // jamais totalement opaque, pour garder l'impression de nuage plutôt que de peinture.
+      // nuage de cendres en suspension : texture de bruit indépendante, qui dérive selon le
+      // vent de la planète (pas la rotation du sol) ; à cendres=1, couverture ~moitié de la
+      // planète et léger (opacité plafonnée basse) — un voile, pas une chape.
       if (haze > 0.02) {
-        const cloud = 0.5 * fbm(px * 1.7 + 5, y * 1.7 + 5, pz * 1.7 + 5) + 0.5 * fbm(px * 3.4 - rot * 0.4, y * 3.4, pz * 3.4 - rot * 0.4);
-        const coverage = smooth(clampUi((cloud - (1 - haze)) / 0.35));
-        const cloudOpacity = coverage * clampUi(haze * 1.3) * 0.85;
+        const drift = rot * d.wind * 0.3;
+        const cloud = 0.5 * fbm(px * 1.7 + 5 + drift * 0.3, y * 1.7 + 5, pz * 1.7 + 5 + drift * 0.3) + 0.5 * fbm(px * 3.4 - drift, y * 3.4, pz * 3.4 - drift);
+        const coverage = smooth(clampUi((cloud - (1 - haze * 0.5)) / 0.3));
+        const cloudOpacity = coverage * clampUi(haze * 1.3) * 0.4;
         r = mix(r, 185, cloudOpacity); g = mix(g, 182, cloudOpacity); b = mix(b, 178, cloudOpacity);
       }
       const light = 0.25 + 0.75 * Math.max(0, x * lx + y * ly + z * lz);
@@ -283,7 +284,7 @@ function drawPlanet(t) {
   // halo d'atmosphère : bleu → orange selon CO2 / surchauffe, puis assombri vers le gris
   // sombre par les cendres volcaniques en suspension (haze) — plus il y en a, plus le ciel
   // est opaque et sale, pas seulement teinté.
-  const atm = clampUi(state.sim.atmosphere / 1.2);
+  const atm = d.atmFill;
   const warm = clampUi(state.sim.co2 * 2 + (d.temp > d.overheat ? 0.3 : 0));
   const haze = clampUi(state.sim.haze);
   const hr = Math.round(mix(mix(110, 255, warm), 45, haze * 0.85));
@@ -304,7 +305,9 @@ function drawPlanet(t) {
 // ---------- jauges, courbes, statut ----------
 
 const GAUGES = [
-  { key: "atmosphere", label: "Taille de l'atmosphère", color: "#6ab7ff", max: 2 },
+  // la jauge de taille = remplissage réel par rapport à la place disponible (capacité
+  // liée à la taille/masse de la planète), pas une valeur brute sans échelle.
+  { key: "atmosphere", label: "Taille de l'atmosphère (remplissage)", color: "#6ab7ff", max: 1, get: (d) => d.atmFill, format: (v) => `${Math.round(v * 100)} %` },
   { key: "co2", label: "CO2", color: "#ff9a5a", max: 1, format: ppm },
   { key: "vegetation", label: "Végétation", color: "#6bd96b", max: 1 },
   { key: "haze", label: "Cendres volcaniques", color: "#a99", max: 1 },
@@ -318,9 +321,9 @@ for (const g of GAUGES) {
   g.bar = el.querySelector("i");
 }
 
-function updateGauges() {
+function updateGauges(d) {
   for (const g of GAUGES) {
-    const v = state.sim[g.key];
+    const v = g.get ? g.get(d) : state.sim[g.key];
     g.value.textContent = (g.format || ((x) => x.toFixed(3)))(v);
     g.bar.style.width = `${clampUi(v / g.max) * 100}%`;
   }
@@ -356,35 +359,81 @@ function updateStatus() {
   const flags = [];
   if (d.magnetic < 1) flags.push(d.magnetic === 0 ? "pas de champ magnétique : l'atmosphère se dissipe" : "champ magnétique faible");
   if (d.temp > d.overheat) flags.push("🔥 surchauffe : la végétation s'effondre");
-  if (state.sim.atmosphere <= coeffs.atmMinVeg) flags.push("atmosphère trop mince pour la vie");
+  if (d.atmTotal <= coeffs.atmMinVeg) flags.push("atmosphère trop mince pour la vie");
+  if (d.greenhouseActive < 0.5) flags.push("☁️ cendres en altitude : effet de serre bloqué");
   $("flags").innerHTML = flags.map((f) => `<p class="flag">⚠ ${f}</p>`).join("");
 
-  updateAtmoComposition(d);
+  updateSunburst(d);
 }
 
-// ---------- composition de l'atmosphère (une barre segmentée, pas un camembert : plus
-// lisible pour comparer des parts, la taille/densité a déjà sa propre jauge ci-dessous) ----------
+// ---------- anneaux concentriques : niveau 1 (centre) la surface de la planète, niveau 2
+// l'atmosphère basse (CO2/vapeur, dans la place disponible — la part non remplie reste en
+// fond, c'est la jauge de densité), niveau 3 l'atmosphère haute (cendres en suspension). ----------
 
-const ATMO_SLICES = [
-  { key: "co2", color: "#ff9a5a", label: "CO2" },
-  { key: "vapor", color: "#8fd0ff", label: "H2O (vapeur)" },
-  { key: "haze", color: "#a99", label: "Cendres volcaniques" }, // même teinte que la jauge « Cendres »
-];
-const NOTABLE_MIN = 0.01; // rien d'affiché si tout ça reste sous ce seuil (juste « autres » à 100 %, pas informatif)
+const sunburst = $("atmo-sunburst");
+const sbctx = sunburst.getContext("2d");
+const BG_RING = "rgba(255,255,255,0.07)"; // « rien de notable » / place encore disponible
 
-function updateAtmoComposition(d) {
-  const co2 = state.sim.co2, vapor = d.vapor, haze = state.sim.haze;
-  const notable = co2 + vapor + haze;
-  if (notable < NOTABLE_MIN) { $("atmo-composition").innerHTML = ""; return; }
-  const other = Math.max(0, 1 - notable);
-  const values = { other, co2, vapor, haze };
-  const total = other + notable || 1;
-  const slices = [{ key: "other", color: "#555", label: "Autres (N2/O2…)" }, ...ATMO_SLICES];
-  $("atmo-composition").innerHTML =
-    `<div class="comp-bar">${slices.map((sl) => `<i style="width:${(values[sl.key] / total) * 100}%;background:${sl.color}"></i>`).join("")}</div>` +
-    `<div class="comp-legend">${slices.map((sl) =>
-      `<span><i class="sw" style="background:${sl.color}"></i>${sl.label} ${((values[sl.key] / total) * 100).toFixed(0)}%</span>`
-    ).join("")}</div>`;
+function ringSlices(ctx, cx, cy, rIn, rOut, slices) {
+  let angle = -Math.PI / 2;
+  for (const { frac, color } of slices) {
+    if (frac <= 0) continue;
+    const next = angle + frac * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOut, angle, next);
+    ctx.arc(cx, cy, rIn, next, angle, true);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    angle = next;
+  }
+}
+
+function updateSunburst(d) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = sunburst.clientWidth, h = sunburst.clientHeight;
+  if (sunburst.width !== w * dpr || sunburst.height !== h * dpr) { sunburst.width = w * dpr; sunburst.height = h * dpr; }
+  sbctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  sbctx.clearRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2;
+  const rMax = Math.min(w, h) / 2 - 2;
+  const ringW = rMax / 3.4;
+  const gap = 2;
+
+  // niveau 1 (centre) : composition de la surface
+  const oceans = clampUi(d.oceans), ice = clampUi(d.ice), veg = clampUi(state.sim.vegetation * (1 - ice - oceans));
+  const rock = Math.max(0, 1 - oceans - ice - veg);
+  ringSlices(sbctx, cx, cy, 0, ringW - gap, [
+    { frac: oceans, color: "#3b82c4" },
+    { frac: ice, color: "#e8ecf0" },
+    { frac: veg, color: "#6bd96b" },
+    { frac: rock, color: "#8a7a6a" },
+  ]);
+
+  // niveau 2 : atmosphère basse (CO2 + H2O vapeur), dans la place disponible — la part
+  // grisée au-delà, c'est de la place encore libre (la jauge de densité/remplissage).
+  const co2 = state.sim.co2, vapor = d.vapor, fill = clampUi(d.atmFill);
+  const filledOther = Math.max(0, fill - co2 - vapor);
+  ringSlices(sbctx, cx, cy, ringW, ringW * 2 - gap, [
+    { frac: co2, color: "#ff9a5a" },
+    { frac: vapor, color: "#8fd0ff" },
+    { frac: filledOther, color: "#999" },
+    { frac: 1 - fill, color: BG_RING },
+  ]);
+
+  // niveau 3 (extérieur) : atmosphère haute, cendres en suspension — même teinte que la
+  // jauge « Cendres » ; le reste du ciel (clair) en fond.
+  const haze = clampUi(state.sim.haze);
+  ringSlices(sbctx, cx, cy, ringW * 2, ringW * 3 - gap, [
+    { frac: haze, color: "#a99" },
+    { frac: 1 - haze, color: BG_RING },
+  ]);
+
+  $("sunburst-legend").innerHTML = [
+    ["#3b82c4", "Océans"], ["#e8ecf0", "Glace"], ["#6bd96b", "Végétation"], ["#8a7a6a", "Roche"],
+    ["#ff9a5a", "CO2"], ["#8fd0ff", "H2O (vapeur)"], ["#999", "Autres gaz"],
+    ["#a99", "Cendres (altitude)"],
+  ].map(([color, label]) => `<span><i class="sw" style="background:${color}"></i>${label}</span>`).join("");
 }
 
 const chart = $("chart");
@@ -467,7 +516,7 @@ function frame(now) {
     }
   }
   drawPlanet(rotTime);
-  updateGauges();
+  updateGauges(derive(state.fixed, state.sim, state.factories, coeffs));
   updateStatus();
   drawChart();
   requestAnimationFrame(frame);
